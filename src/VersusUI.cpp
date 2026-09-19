@@ -131,7 +131,8 @@ std::string lower(std::string value) {
 
 std::string rulesText(GameRules const& rules) {
     std::string result = rules.mode == 0
-        ? fmt::format("{} Attempts", rules.attempts) : fmt::format("First to {}%", rules.targetPercent);
+        ? (rules.practice ? "Fewest Attempts" : fmt::format("{} Attempts", rules.attempts))
+        : fmt::format("First to {}%", rules.targetPercent);
     if (rules.practice) result += " / Practice";
     else if (rules.sequence && rules.mode == 0) result += " / Sequence";
     return result;
@@ -559,6 +560,7 @@ class GameRulesPopup : public Popup {
         return true;
     }
     void refresh() {
+        if (m_rules.mode != 0 || m_rules.practice) m_rules.sequence = false;
         caption(m_mode, m_rules.mode == 0 ? "Mode: Attempts" : "Mode: Percent", .55f);
         m_valueTitle->setString(m_rules.mode == 0 ? "Attempt limit (1-99)" : "Target percent (1-100)");
         m_value->setString(std::to_string(m_rules.mode == 0 ? m_rules.attempts : m_rules.targetPercent));
@@ -569,9 +571,12 @@ class GameRulesPopup : public Popup {
         m_value->getBGSprite()->setOpacity(valueEnabled ? 230 : 105);
         enabled(m_less, valueEnabled);
         enabled(m_more, valueEnabled);
+        m_sequence->setVisible(m_rules.mode == 0);
         enabled(m_sequence, !m_rules.practice && m_rules.mode == 0 && !m_pending);
-        m_hint->setString(m_rules.practice ? "Sequence is disabled in Practice." :
-            m_rules.mode != 0 ? "Sequence is available in Attempts mode." :
+        enabled(m_mode, !m_pending);
+        enabled(m_practice, !m_pending);
+        m_hint->setString(m_rules.mode != 0 ? "Reach the target in your current attempt." :
+            m_rules.practice ? "Clear with the fewest practice attempts." :
             m_rules.sequence ? "Players take turns; the other watches." : "Players play at the same time.");
     }
     void onMode(CCObject*) {
@@ -608,6 +613,7 @@ class GameRulesPopup : public Popup {
         }
         m_value->defocus();
         m_pending = true;
+        refresh();
         enabled(m_save, false);
         m_closeBtn->setEnabled(false);
         Service::get().configureRules(m_rules, [self = WeakRef<GameRulesPopup>(this)](bool success, std::string detail) {
@@ -615,6 +621,7 @@ class GameRulesPopup : public Popup {
             if (!owner) return;
             owner->m_pending = false;
             if (success) { owner->onClose(nullptr); return; }
+            owner->refresh();
             enabled(owner->m_save, true);
             owner->m_closeBtn->setEnabled(true);
             error(detail);
@@ -802,38 +809,65 @@ class LobbyLayer : public SceneLayer {
             if (filteredIndex >= m_filtered.size()) break;
             auto const index = m_filtered[filteredIndex];
             auto const& room = m_rooms[index];
+            bool const full = room.guest.has_value();
+            auto const accent = room.rules.mode == 1 ? ccc3(178, 159, 255) : ccc3(80, 221, 255);
+            auto const stateColor = room.started ? ccc3(255, 203, 117) : full ? kMuted : ccc3(117, 247, 184);
             auto* rowSprite = CCSprite::create();
             rowSprite->setContentSize({m_listWidth - 24.f, rowHeight});
+            float const rowWidth = rowSprite->getContentSize().width;
             auto* bg = NineSlice::create("square02b_001.png");
             bg->setContentSize(rowSprite->getContentSize());
-            bg->setColor(row % 2 ? ccc3(10, 44, 106) : ccc3(5, 28, 79));
-            bg->setOpacity(215);
+            bg->setColor(ccc3(8, 24, 59));
+            bg->setOpacity(245);
             bg->setPosition(rowSprite->getContentSize() / 2.f);
             rowSprite->addChild(bg, -1);
+            auto* gradient = CCLayerGradient::create(
+                room.rules.mode == 1 ? ccc4(74, 55, 132, 220) : ccc4(17, 100, 155, 220),
+                ccc4(10, 31, 70, 170), {1.f, -.3f});
+            gradient->setContentSize({rowWidth - 8.f, rowHeight - 6.f});
+            gradient->setPosition({4.f, 3.f});
+            rowSprite->addChild(gradient, -1);
+            auto* trim = CCDrawNode::create();
+            trim->drawSegment({5.f, 7.f}, {5.f, rowHeight - 7.f}, 1.4f,
+                {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .95f});
+            trim->drawSegment({10.f, rowHeight - 3.f}, {rowWidth - 10.f, rowHeight - 3.f}, .45f,
+                {.65f, .86f, 1.f, .3f});
+            trim->drawDot({34.f, rowHeight / 2.f}, rowHeight * .38f, {.12f, .24f, .48f, .9f});
+            rowSprite->addChild(trim);
             if (room.privateRoom) {
                 auto* lock = CCSprite::createWithSpriteFrameName("GJ_lockGray_001.png");
-                lock->setScale(.33f);
-                lock->setColor(kIce);
-                lock->setPosition({12.f, rowHeight / 2.f});
-                rowSprite->addChild(lock);
+                lock->setScale(.23f);
+                lock->setColor(ccc3(255, 217, 144));
+                lock->setPosition({17.f, rowHeight * .28f});
+                rowSprite->addChild(lock, 2);
             }
-            player(rowSprite, room.host, {37.f, rowHeight / 2.f}, .57f);
+            player(rowSprite, room.host, {34.f, rowHeight / 2.f}, .60f);
             label(rowSprite, room.host.name, {57.f, rowHeight * .76f}, .32f,
                 m_listWidth - 149.f, {255, 255, 255}, true);
             label(rowSprite, room.name, {57.f, rowHeight * .43f}, .39f,
                 m_listWidth - 149.f, kIce, true, "chatFont.fnt");
-            label(rowSprite, rulesText(room.rules), {57.f, rowHeight * .13f}, .32f,
-                m_listWidth - 149.f, ccc3(160, 220, 200), true, "chatFont.fnt");
-            auto const full = room.guest.has_value();
-            label(rowSprite, full ? "2 / 2" : "1 / 2", {m_listWidth - 53.f, rowHeight * .65f},
-                .29f, 47.f, full ? kMuted : ccc3(140, 255, 185));
+            float const badgeWidth = m_listWidth - 151.f;
+            auto* modeBadge = NineSlice::create("square02b_001.png");
+            modeBadge->setContentSize({badgeWidth, std::max(8.f, rowHeight * .25f)});
+            modeBadge->setColor(room.rules.mode == 1 ? ccc3(46, 34, 88) : ccc3(7, 56, 85));
+            modeBadge->setPosition({57.f + badgeWidth / 2.f, rowHeight * .15f});
+            rowSprite->addChild(modeBadge);
+            label(rowSprite, rulesText(room.rules), {61.f, rowHeight * .15f}, .30f,
+                badgeWidth - 8.f, accent, true, "chatFont.fnt");
+            auto* statusBadge = NineSlice::create("square02b_001.png");
+            statusBadge->setContentSize({48.f, rowHeight - 9.f});
+            statusBadge->setColor(room.started ? ccc3(79, 56, 31) : full ? ccc3(24, 41, 64) : ccc3(10, 66, 61));
+            statusBadge->setPosition({rowWidth - 29.f, rowHeight / 2.f});
+            rowSprite->addChild(statusBadge);
+            label(rowSprite, full ? "2 / 2" : "1 / 2", {rowWidth - 29.f, rowHeight * .65f},
+                .29f, 43.f, stateColor);
             label(rowSprite, room.started ? (room.launch && !room.launch->releasedAt ? "LOADING" : "PLAYING") : full ? "FULL" : "JOIN",
-                {m_listWidth - 53.f, rowHeight * .25f}, .22f, 47.f, kIce);
+                {rowWidth - 29.f, rowHeight * .28f}, .22f, 43.f, stateColor);
             auto* item = CCMenuItemSpriteExtra::create(rowSprite, this, menu_selector(LobbyLayer::onJoin));
             item->setPosition({m_listWidth / 2.f, m_height - 79.f - row * rowStep});
             item->setTag(static_cast<int>(index));
             rowsMenu->addChild(item);
-            enabled(item, !full && !room.started && !m_mutating && !m_loadingStats);
+            item->setEnabled(!full && !room.started && !m_mutating && !m_loadingStats);
         }
     }
     void refreshStats() {
@@ -953,6 +987,9 @@ class RoomLayer : public SceneLayer {
     CCNode* m_emotes = nullptr;
     CCLabelBMFont* m_status = nullptr;
     float m_elapsed = 1.f;
+    float m_readyPhase = 0.f;
+    NineSlice* m_readyGlow = nullptr;
+    ButtonSprite* m_readySprite = nullptr;
     float m_emoteCooldown = 0.f;
     bool m_pending = false;
     bool m_sendingEmote = false;
@@ -962,6 +999,17 @@ class RoomLayer : public SceneLayer {
     std::string m_cacheError;
     std::string m_seenEmote;
     std::string m_signature;
+
+    void animateReady() {
+        if (!m_readyGlow || !m_readySprite) return;
+        auto channel = [this](float offset) {
+            return static_cast<GLubyte>(155.f + 100.f * std::sin(m_readyPhase + offset));
+        };
+        auto color = ccc3(channel(0.f), channel(2.0944f), channel(4.1888f));
+        m_readyGlow->setColor(color);
+        m_readyGlow->setOpacity(static_cast<GLubyte>(130.f + 55.f * std::sin(m_readyPhase * 2.f)));
+        m_readySprite->m_BGSprite->setColor(color);
+    }
 
     void beginDownload() {
         auto const& room = Service::get().room();
@@ -1077,6 +1125,8 @@ class RoomLayer : public SceneLayer {
             else if (m_cached) preloadBattleAssets();
         } else if (room.level.id > 0) m_cached = mapCached(room.level.id);
         m_signature = signature(room);
+        m_readyGlow = nullptr;
+        m_readySprite = nullptr;
         m_content->removeAllChildrenWithCleanup(true);
         float const width = std::min(550.f, m_window.width - 44.f);
         float const height = std::min(250.f, m_window.height - 65.f);
@@ -1132,14 +1182,14 @@ class RoomLayer : public SceneLayer {
             myReady ? "GJ_button_04.png" : "GJ_button_01.png");
         enabled(ready, !m_pending && !Service::get().busy() && !room.started && room.level.id > 0 && (myReady || m_cached));
         if (!myReady && ready->isEnabled()) {
-            ready->setCascadeColorEnabled(true);
-            ready->runAction(CCRepeatForever::create(CCSequence::create(
-                CCTintTo::create(.35f, 255, 120, 180), CCTintTo::create(.35f, 255, 225, 90),
-                CCTintTo::create(.35f, 100, 255, 165), CCTintTo::create(.35f, 100, 190, 255),
-                CCTintTo::create(.35f, 210, 125, 255), nullptr)));
-            ready->runAction(CCRepeatForever::create(CCSequence::create(
-                CCEaseSineInOut::create(CCScaleTo::create(.55f, 1.08f)),
-                CCEaseSineInOut::create(CCScaleTo::create(.55f, 1.f)), nullptr)));
+            // Tint the actual background; menu-item color does not propagate
+            // through every ButtonSprite child. Keep phase across room redraws.
+            m_readySprite = static_cast<ButtonSprite*>(ready->getNormalImage());
+            m_readyGlow = NineSlice::create("square02b_001.png");
+            m_readyGlow->setContentSize(ready->getContentSize() + CCSize{8.f, 7.f});
+            m_readyGlow->setPosition(ready->getPosition());
+            frame->addChild(m_readyGlow, 4);
+            animateReady();
         }
         if (host) {
             auto* choose = button(actions, this, menu_selector(RoomLayer::onChoose), "Choose Map",
@@ -1286,6 +1336,8 @@ public:
     CREATE_FUNC(RoomLayer);
     void update(float dt) override {
         if (m_transitioning) return;
+        m_readyPhase = std::fmod(m_readyPhase + dt * 2.f, 6.2831853f);
+        animateReady();
         m_emoteCooldown = std::max(0.f, m_emoteCooldown - dt);
         m_elapsed += dt;
         if (m_elapsed < 1.f) return;

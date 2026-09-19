@@ -1,3 +1,11 @@
+# v0.4.1
+
+- Fix empty rooms being incorrectly reported as full and host readiness resetting on heartbeat.
+- Hide sequence controls in Percent mode and keep rule editing locked while saving.
+- Give the Ready button a continuous rainbow background and glow.
+- Restyle room rows with blue gradients, mode badges, and distinct occupancy colors.
+- Show the correct fewest-attempts rule for practice matches.
+
 # v0.4.0
 
 - Add host rule controls for attempts, percent targets, sequence and practice.

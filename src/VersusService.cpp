@@ -1,5 +1,6 @@
 #include "VersusService.hpp"
 #include "FirebaseConfig.hpp"
+#include "RoomMembership.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -200,9 +201,9 @@ bool battleTerminal(Json const& player, GameRules const& rules) {
 void resolveBattle(Json& body, std::string const& actorUid) {
     auto& battle = body["battle"];
     if (!battle.isObject() || intAt(battle, "finishedAt") > 0) return;
-    auto const rules = parseRules(body["rules"]);
-    auto const hostUid = stringAt(body["host"], "uid");
-    auto const guestUid = stringAt(body["guest"], "uid");
+    auto const rules = parseRules(std::as_const(body)["rules"]);
+    auto const hostUid = stringAt(std::as_const(body)["host"], "uid");
+    auto const guestUid = stringAt(std::as_const(body)["guest"], "uid");
     auto const host = battle["host"];
     auto const guest = battle["guest"];
     std::string winner;
@@ -261,7 +262,7 @@ RoomInfo parseRoom(std::string id, Json const& value) {
     result.id = std::move(id); result.name = stringAt(value, "name");
     result.privateRoom = boolAt(value, "privateRoom");
     result.host = parseProfile(value["host"]);
-    if (value["guest"].isObject()) result.guest = parseProfile(value["guest"]);
+    if (hasRoomGuest(value)) result.guest = parseProfile(value["guest"]);
     result.level.id = intAt(value["level"], "id");
     result.level.name = stringAt(value["level"], "name");
     result.level.difficulty = static_cast<int>(intAt(value["level"], "difficulty"));
@@ -400,7 +401,7 @@ void recoverMembership(std::string id, uint64_t epoch, bool host, std::string er
             auto parsed = response.json();
             if (response.ok() && parsed && parsed.unwrap().isObject()) {
                 auto const& body = parsed.unwrap();
-                if (stringAt(body[host ? "host" : "guest"], "uid") == s.profile.uid &&
+                if (stringAt(std::as_const(body)[host ? "host" : "guest"], "uid") == s.profile.uid &&
                     nowMs() - intAt(body, "hostSeen") <= firebase_config::PRESENCE_TIMEOUT_MS) {
                     adoptRoom(id, body);
                     callback(true, {});
@@ -458,11 +459,11 @@ void pollRoom() {
         auto const body = parsed.unwrap();
         if (body.isNull()) { disconnected("The host left the room."); return; }
         if (!body.isObject()) return;
-        if (stringAt(body["host"], "uid") != s.profile.uid) {
+        if (stringAt(std::as_const(body)["host"], "uid") != s.profile.uid) {
             if (nowMs() - intAt(body, "hostSeen") > firebase_config::PRESENCE_TIMEOUT_MS) {
                 disconnected("The host disconnected."); return;
             }
-            if (stringAt(body["guest"], "uid") != s.profile.uid) {
+            if (stringAt(std::as_const(body)["guest"], "uid") != s.profile.uid) {
                 disconnected("Your room connection expired."); return;
             }
         }
@@ -476,14 +477,14 @@ void heartbeat() {
     auto const id = s.room->id; auto const epoch = s.epoch;
     mutateRoom(id, epoch, [](Json& body) -> std::string {
         auto const uid = state().profile.uid;
-        if (stringAt(body["host"], "uid") == uid) {
+        if (stringAt(std::as_const(body)["host"], "uid") == uid) {
             body["hostSeen"] = timestamp();
-            if (body["guest"].isObject() && nowMs() - intAt(body, "guestSeen") > firebase_config::PRESENCE_TIMEOUT_MS) {
+            if (roomGuestExpired(body, nowMs(), firebase_config::PRESENCE_TIMEOUT_MS)) {
                 body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
                 body["hostReady"] = false; body["guestReady"] = false;
                 body["launch"] = nullptr; body["battle"] = nullptr;
             }
-        } else if (stringAt(body["guest"], "uid") == uid) {
+        } else if (stringAt(std::as_const(body)["guest"], "uid") == uid) {
             if (nowMs() - intAt(body, "hostSeen") > firebase_config::PRESENCE_TIMEOUT_MS)
                 return "The host disconnected.";
             body["guestSeen"] = timestamp();
@@ -672,11 +673,8 @@ void Service::joinRoom(RoomInfo room, std::string pin, Done callback) {
             if (!admitted) { state().writing = false; callback(false, std::move(error)); return; }
             mutateRoom(id, epoch, [](Json& body) -> std::string {
                 auto const uid = state().profile.uid;
-                if (stringAt(body["host"], "uid") == uid) return "This is already your room.";
-                if (nowMs() - intAt(body, "hostSeen") > firebase_config::PRESENCE_TIMEOUT_MS) return "The host disconnected.";
-                if (stringAt(body["guest"], "uid") == uid) { body["guestSeen"] = timestamp(); return {}; }
-                if (boolAt(body, "started")) return "The match has already started.";
-                if (body["guest"].isObject()) return "This room is full.";
+                if (auto error = roomJoinError(body, uid, nowMs(), firebase_config::PRESENCE_TIMEOUT_MS); !error.empty()) return error;
+                if (stringAt(std::as_const(body)["guest"], "uid") == uid) { body["guestSeen"] = timestamp(); return {}; }
                 body["guest"] = profileJson(state().profile); body["guestSeen"] = timestamp();
                 body["guestReady"] = false; body["guestEmoteAt"] = 0; return {};
             }, [id, epoch, callback = std::move(callback)](bool success, std::string error) mutable {
@@ -711,8 +709,8 @@ void Service::leaveRoom(Done callback) {
     s.writing = true;
     mutateRoom(id, epoch, [host](Json& body) -> std::string {
         auto const uid = state().profile.uid;
-        if (host && stringAt(body["host"], "uid") == uid) body = nullptr;
-        else if (!host && stringAt(body["guest"], "uid") == uid) {
+        if (host && stringAt(std::as_const(body)["host"], "uid") == uid) body = nullptr;
+        else if (!host && stringAt(std::as_const(body)["guest"], "uid") == uid) {
             body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
             body["hostReady"] = false; body["guestReady"] = false;
             body["launch"] = nullptr; body["battle"] = nullptr;
@@ -742,12 +740,12 @@ void Service::selectLevel(LevelInfo level, Done callback) {
     if (!isHost() || busy() || level.id <= 0) { callback(false, "Only the host can select a level."); return; }
     auto const epoch = state().epoch; state().writing = true;
     mutateRoom(state().room->id, epoch, [level = std::move(level)](Json& body) -> std::string {
-        if (stringAt(body["host"], "uid") != state().profile.uid) return "Only the host can select a level.";
+        if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can select a level.";
         if (boolAt(body, "started")) return "The match has already started.";
         auto value = Json::object(); value["id"] = level.id; value["name"] = level.name;
         value["difficulty"] = level.autoLevel ? -1 : level.difficulty; value["stars"] = level.stars;
         value["demon"] = level.demon; value["autoLevel"] = level.autoLevel;
-        if (body["level"] != value) { body["hostReady"] = false; body["guestReady"] = false; }
+        if (std::as_const(body)["level"] != value) { body["hostReady"] = false; body["guestReady"] = false; }
         body["level"] = value; return {};
     }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
         if (epoch == state().epoch) state().writing = false;
@@ -768,10 +766,10 @@ void Service::configureRules(GameRules rules, Done callback) {
     auto const epoch = state().epoch;
     state().writing = true;
     mutateRoom(state().room->id, epoch, [rules](Json& body) -> std::string {
-        if (stringAt(body["host"], "uid") != state().profile.uid) return "Only the host can change game rules.";
+        if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can change game rules.";
         if (boolAt(body, "started")) return "The match has already started.";
         auto const newRules = rulesJson(rules);
-        if (body["rules"] != newRules) {
+        if (std::as_const(body)["rules"] != newRules) {
             body["rules"] = newRules;
             body["hostReady"] = false;
             body["guestReady"] = false;
@@ -803,14 +801,14 @@ void Service::setReady(bool ready, Done callback) {
     state().writing = true;
     mutateRoom(state().room->id, epoch, [ready, expectedLevel](Json& body) -> std::string {
         auto const uid = state().profile.uid;
-        bool const host = stringAt(body["host"], "uid") == uid;
-        if (!host && stringAt(body["guest"], "uid") != uid) return "Your room connection expired.";
+        bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
+        if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
         if (boolAt(body, "started")) return "The match has already started.";
-        if (ready && (intAt(body["level"], "id") <= 0 ||
-            intAt(body["level"], "id") != expectedLevel.id ||
-            stringAt(body["level"], "name") != expectedLevel.name ||
-            intAt(body["level"], "stars") != expectedLevel.stars ||
-            intAt(body["level"], "difficulty") != expectedLevel.difficulty))
+        if (ready && (intAt(std::as_const(body)["level"], "id") <= 0 ||
+            intAt(std::as_const(body)["level"], "id") != expectedLevel.id ||
+            stringAt(std::as_const(body)["level"], "name") != expectedLevel.name ||
+            intAt(std::as_const(body)["level"], "stars") != expectedLevel.stars ||
+            intAt(std::as_const(body)["level"], "difficulty") != expectedLevel.difficulty))
             return "The map changed. Check the selected map and ready again.";
         body[host ? "hostReady" : "guestReady"] = ready;
         body[host ? "hostSeen" : "guestSeen"] = timestamp();
@@ -837,8 +835,8 @@ void Service::sendEmote(std::string kind, Done callback) {
     state().writing = true;
     mutateRoom(state().room->id, epoch, [kind = std::move(kind), nonce = randomId()](Json& body) -> std::string {
         auto const uid = state().profile.uid;
-        bool const host = stringAt(body["host"], "uid") == uid;
-        if (!body["guest"].isObject() || (!host && stringAt(body["guest"], "uid") != uid))
+        bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
+        if (!std::as_const(body)["guest"].isObject() || (!host && stringAt(std::as_const(body)["guest"], "uid") != uid))
             return "Wait for the other player.";
         auto const timeKey = host ? "hostEmoteAt" : "guestEmoteAt";
         if (nowMs() - intAt(body, timeKey) < 1000) return "Wait one second between emotes.";
@@ -861,12 +859,12 @@ void Service::startMatch(Done callback) {
     if (!isHost() || busy()) { callback(false, "Only the host can start the match."); return; }
     auto const epoch = state().epoch; state().writing = true;
     mutateRoom(state().room->id, epoch, [launchId = randomId(), firstHost = (std::random_device{}() & 1) == 0](Json& body) -> std::string {
-        if (stringAt(body["host"], "uid") != state().profile.uid) return "Only the host can start the match.";
+        if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can start the match.";
         if (boolAt(body, "started")) return "The match has already started.";
-        if (!body["guest"].isObject() || nowMs() - intAt(body, "guestSeen") > firebase_config::PRESENCE_TIMEOUT_MS) return "Wait for another player.";
+        if (!std::as_const(body)["guest"].isObject() || nowMs() - intAt(body, "guestSeen") > firebase_config::PRESENCE_TIMEOUT_MS) return "Wait for another player.";
         if (!boolAt(body, "hostReady") || !boolAt(body, "guestReady")) return "Both players must be ready.";
-        if (intAt(body["level"], "id") <= 0) return "Choose a level first.";
-        auto const rules = parseRules(body["rules"]);
+        if (intAt(std::as_const(body)["level"], "id") <= 0) return "Choose a level first.";
+        auto const rules = parseRules(std::as_const(body)["rules"]);
         if ((rules.mode != 0 && rules.mode != 1) || rules.attempts < 1 || rules.attempts > 99 ||
             rules.targetPercent < 1 || rules.targetPercent > 100 ||
             (rules.practice && rules.sequence) || (rules.mode == 1 && rules.sequence)) return "Invalid game rules.";
@@ -874,7 +872,7 @@ void Service::startMatch(Done callback) {
         launch["id"] = launchId; launch["requestedAt"] = timestamp();
         launch["hostLoaded"] = false; launch["guestLoaded"] = false; launch["releasedAt"] = 0;
         auto battle = Json::object();
-        auto const firstUid = stringAt(body[firstHost ? "host" : "guest"], "uid");
+        auto const firstUid = stringAt(std::as_const(body)[firstHost ? "host" : "guest"], "uid");
         bool const sequential = rules.mode == 0 && rules.sequence && !rules.practice;
         battle["id"] = launchId;
         battle["firstUid"] = firstUid;
@@ -906,10 +904,10 @@ void Service::markLoaded(std::string launchId, Done callback) {
     mutateRoom(state().room->id, epoch, [launchId = std::move(launchId)](Json& body) -> std::string {
         auto& launch = body["launch"];
         if (!boolAt(body, "started") || stringAt(launch, "id") != launchId ||
-            stringAt(body["battle"], "id") != launchId) return "The match was cancelled.";
+            stringAt(std::as_const(body)["battle"], "id") != launchId) return "The match was cancelled.";
         auto const uid = state().profile.uid;
-        bool const host = stringAt(body["host"], "uid") == uid;
-        if (!host && stringAt(body["guest"], "uid") != uid) return "Your room connection expired.";
+        bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
+        if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
         auto const key = host ? "hostLoaded" : "guestLoaded";
         if (intAt(launch, "releasedAt") > 0) return boolAt(launch, key) ? "" : "The match has already started.";
         if (nowMs() >= intAt(launch, "requestedAt") + 60000) return "Loading timed out after 60 seconds.";
@@ -934,9 +932,9 @@ void Service::cancelLaunch(std::string launchId, Done callback) {
     auto const epoch = state().epoch; state().writing = true;
     mutateRoom(state().room->id, epoch, [launchId = std::move(launchId)](Json& body) -> std::string {
         auto const uid = state().profile.uid;
-        if (stringAt(body["host"], "uid") != uid && stringAt(body["guest"], "uid") != uid)
+        if (stringAt(std::as_const(body)["host"], "uid") != uid && stringAt(std::as_const(body)["guest"], "uid") != uid)
             return "Your room connection expired.";
-        if (body["launch"].isObject() && stringAt(body["launch"], "id") != launchId) return "Match session changed.";
+        if (std::as_const(body)["launch"].isObject() && stringAt(std::as_const(body)["launch"], "id") != launchId) return "Match session changed.";
         body["started"] = false;
         body["hostReady"] = false; body["guestReady"] = false;
         body["launch"] = nullptr; body["battle"] = nullptr;
@@ -959,16 +957,16 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
     mutateRoom(state().room->id, epoch,
         [progress, sendPosition, matchId](Json& body) -> std::string {
             auto const uid = state().profile.uid;
-            bool const host = stringAt(body["host"], "uid") == uid;
-            if (!host && stringAt(body["guest"], "uid") != uid) return "Your room connection expired.";
-            if (!boolAt(body, "started") || stringAt(body["launch"], "id") != matchId ||
-                stringAt(body["battle"], "id") != matchId || intAt(body["launch"], "releasedAt") <= 0)
+            bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
+            if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
+            if (!boolAt(body, "started") || stringAt(std::as_const(body)["launch"], "id") != matchId ||
+                stringAt(std::as_const(body)["battle"], "id") != matchId || intAt(std::as_const(body)["launch"], "releasedAt") <= 0)
                 return "The battle is no longer active.";
             auto& battle = body["battle"];
             if (intAt(battle, "finishedAt") > 0) return "The battle has finished.";
             bool const otherSpectating = boolAt(battle[host ? "guest" : "host"], "spectating");
             auto& own = battle[host ? "host" : "guest"];
-            auto const rules = parseRules(body["rules"]);
+            auto const rules = parseRules(std::as_const(body)["rules"]);
             if (progress.attemptsUsed < intAt(own, "attemptsUsed") ||
                 progress.runNumber < intAt(own, "runNumber") ||
                 progress.attemptsUsed < 0 || progress.runNumber < 0 ||
