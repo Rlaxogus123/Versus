@@ -96,13 +96,13 @@ public:
     }
     void levelDownloadFinished(GJGameLevel* value) override {
         if (!pending) return;
+        bool valid = current && current->id == pendingID && generation == requestGeneration;
         if (!value) {
             releaseDelegate();
-            finish(false, "The selected map returned no data.");
+            if (valid) finish(false, "The selected map returned no data.");
             return;
         }
         if (value->m_levelID.value() != pendingID) return;
-        bool valid = current && current->id == pendingID && generation == requestGeneration;
         releaseDelegate();
         if (!value->m_levelString.empty()) levels[value->m_levelID.value()] = value;
         else if (valid) finish(false, "The selected map contains no level data.");
