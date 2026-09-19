@@ -229,7 +229,7 @@ public:
         });
     }
     void forfeit() {
-        if (!active || leaving) return;
+        if (!active || finished || leaving) return;
         saveAttempt();
         local.forfeited = true; local.inAttempt = false; local.paused = false;
         local.pausedAt = 0; local.spectating = true; spectating = true;
