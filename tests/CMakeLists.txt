@@ -10,3 +10,7 @@ target_include_directories(membership PRIVATE ../src)
 target_link_libraries(membership PRIVATE mat-json)
 enable_testing()
 add_test(NAME membership COMMAND membership)
+
+add_executable(map_cache map_cache.cpp)
+target_include_directories(map_cache PRIVATE fakes ../src)
+add_test(NAME map_cache COMMAND map_cache)

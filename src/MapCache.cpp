@@ -5,6 +5,7 @@
 #include <Geode/binding/LevelDownloadDelegate.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/binding/MusicDownloadDelegate.hpp>
+#include <Geode/binding/SongInfoObject.hpp>
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -12,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <utility>
 
 using namespace geode::prelude;
 namespace {
@@ -43,8 +45,13 @@ class Cache final : public CCNode, public LevelDownloadDelegate, public MusicDow
     int pendingID = 0;
     uint64_t generation = 0, requestGeneration = 0;
     bool watchingMusic = false, askedURL = false;
-    std::set<int> songs, sounds, requestedSongs, requestedSounds;
-    Clock::time_point began;
+    std::set<int> songs, sounds, requestedSongs, requestedSounds, requestedInfo;
+    std::map<int, unsigned> songAttempts, soundAttempts, infoAttempts;
+    std::map<int, Clock::time_point> songRetryAt, soundRetryAt, infoRetryAt;
+    unsigned levelAttempts = 0;
+    Clock::time_point began, progressed, levelRetryAt;
+    std::string failure;
+    size_t completedAssets = 0;
     float timer = 0.f;
 public:
     static Cache& get() {
@@ -84,7 +91,9 @@ public:
         watchingMusic = false;
         auto callbacks = std::move(current->callbacks);
         current.reset();
-        songs.clear(); sounds.clear(); requestedSongs.clear(); requestedSounds.clear();
+        songs.clear(); sounds.clear(); requestedSongs.clear(); requestedSounds.clear(); requestedInfo.clear();
+        songAttempts.clear(); soundAttempts.clear(); infoAttempts.clear();
+        songRetryAt.clear(); soundRetryAt.clear(); infoRetryAt.clear();
         // The outstanding level delegate stays owned until its matching native
         // callback; this prevents a canceled response being delivered to a new job.
         for (auto& callback : callbacks) if (callback) callback(success, detail);
@@ -99,26 +108,43 @@ public:
         bool valid = current && current->id == pendingID && generation == requestGeneration;
         if (!value) {
             releaseDelegate();
-            if (valid) finish(false, "The selected map returned no data.");
+            if (valid) retryLevel("The selected map returned no data.");
             return;
         }
         if (value->m_levelID.value() != pendingID) return;
         releaseDelegate();
         if (!value->m_levelString.empty()) levels[value->m_levelID.value()] = value;
-        else if (valid) finish(false, "The selected map contains no level data.");
+        else if (valid) retryLevel("The selected map contains no level data.");
     }
-    void levelDownloadFailed(int) override {
-        if (!pending) return;
+    void retryLevel(std::string const& detail) {
+        // Callbacks can run while native code is enumerating delegates. Finish
+        // only from update(), after that enumeration has returned.
+        log::warn("Versus map {} download attempt {} failed: {}", pendingID, levelAttempts, detail);
+        if (levelAttempts >= 3) failure = detail;
+        else levelRetryAt = Clock::now() + std::chrono::seconds(2 * levelAttempts);
+    }
+    void levelDownloadFailed(int id) override {
+        if (!pending || (id != 0 && id != pendingID)) return;
         bool valid = current && current->id == pendingID && generation == requestGeneration;
         releaseDelegate();
-        if (valid) finish(false, "The selected map could not be downloaded.");
+        if (valid) retryLevel(fmt::format("Map {} could not be downloaded from the level server.", pendingID));
     }
-    void downloadSongFailed(int id, GJSongError) override {
-        if (current && requestedSongs.contains(id)) finish(false, "The map's music could not be downloaded.");
+    void audioFailed(int id, GJSongError error, bool sound, bool info = false) {
+        auto& requested = info ? requestedInfo : sound ? requestedSounds : requestedSongs;
+        if (!current || !requested.erase(id)) return;
+        auto& attempts = info ? infoAttempts : sound ? soundAttempts : songAttempts;
+        auto& retryAt = info ? infoRetryAt : sound ? soundRetryAt : songRetryAt;
+        auto kind = info ? "Song information" : sound ? "Sound" : "Song";
+        log::warn("Versus {} {} failed ({}), attempt {}", kind, id, static_cast<int>(error), attempts[id]);
+        if (attempts[id] >= 3) failure = fmt::format("{} {} download failed ({}).", kind, id, static_cast<int>(error));
+        else retryAt[id] = Clock::now() + std::chrono::seconds(2 * attempts[id]);
     }
-    void downloadSFXFailed(int id, GJSongError) override {
-        if (current && requestedSounds.contains(id)) finish(false, "The map's sounds could not be downloaded.");
+    void loadSongInfoFinished(SongInfoObject* song) override {
+        if (current && song && requestedInfo.erase(song->m_songID)) progressed = Clock::now();
     }
+    void loadSongInfoFailed(int id, GJSongError error) override { audioFailed(id, error, false, true); }
+    void downloadSongFailed(int id, GJSongError error) override { audioFailed(id, error, false); }
+    void downloadSFXFailed(int id, GJSongError error) override { audioFailed(id, error, true); }
     void update(float dt) override {
         timer -= dt;
         if (timer > 0.f) return;
@@ -133,16 +159,27 @@ public:
             if (queue.empty()) return;
             current = std::move(queue.front()); queue.pop_front();
             ++generation;
-            began = Clock::now();
+            began = progressed = Clock::now();
+            levelRetryAt = began;
+            levelAttempts = 0;
+            completedAssets = 0;
+            failure.clear();
             askedURL = false;
         }
-        if (Clock::now() - began > std::chrono::seconds(60)) { finish(false, "Map download timed out. Try again."); return; }
+        if (!failure.empty()) { finish(false, std::exchange(failure, {})); return; }
+        // Large multi-song maps can take longer than a minute. The launch
+        // controller separately enforces its 60-second opponent wait deadline.
+        if (Clock::now() - progressed > std::chrono::seconds(120) ||
+            Clock::now() - began > std::chrono::minutes(10)) {
+            finish(false, "Map/audio download timed out. Try again."); return;
+        }
         auto* value = level(current->id);
         if (!value) {
             auto* manager = GameLevelManager::sharedState();
-            if (pending || manager->m_levelDownloadDelegate ||
+            if (Clock::now() < levelRetryAt || pending || manager->m_levelDownloadDelegate ||
                 manager->isDLActive(manager->getLevelDownloadKey(current->id, false, 0))) return;
             pending = true; pendingID = current->id; requestGeneration = generation;
+            ++levelAttempts;
             manager->m_levelDownloadDelegate = this;
             manager->downloadLevel(pendingID, false, 0);
             return;
@@ -153,6 +190,7 @@ public:
             songs = std::move(dependencies.first); sounds = std::move(dependencies.second);
             music->tryLoadLibraries();
             music->addMusicDownloadDelegate(this); watchingMusic = true;
+            progressed = Clock::now();
         }
         if (ready(current->id)) { finish(true, {}); return; }
         bool needsURL = std::any_of(songs.begin(), songs.end(), [music](int i) {
@@ -162,20 +200,36 @@ public:
             if (!askedURL) { askedURL = true; music->getCustomContentURL(); }
             return;
         }
-        int pendingAssets = 0;
+        size_t const completed = std::count_if(songs.begin(), songs.end(), [music](int id) { return music->isSongDownloaded(id); }) +
+            std::count_if(sounds.begin(), sounds.end(), [music](int id) { return music->isSFXDownloaded(id); });
+        if (completed > completedAssets) { completedAssets = completed; progressed = Clock::now(); }
+        int pendingAssets = static_cast<int>(requestedInfo.size());
         for (int i : requestedSongs) if (!music->isSongDownloaded(i)) ++pendingAssets;
         for (int i : requestedSounds) if (!music->isSFXDownloaded(i)) ++pendingAssets;
         for (int i : songs) {
             if (pendingAssets >= 3) break;
             if (music->isSongDownloaded(i) || requestedSongs.contains(i) || music->isRunningActionForSongID(i)) continue;
-            requestedSongs.insert(i); ++pendingAssets; music->downloadSong(i);
-            if (!current) return;
+            // NG metadata carries the real audio URL. Fetch it first instead
+            // of letting downloadSong fall back to the generic NG endpoint.
+            if (i <= 10000000) {
+                auto* info = music->getSongInfoObject(i);
+                if (!info || info->m_songUrl.empty() || info->m_unloaded) {
+                    if (requestedInfo.contains(i) || Clock::now() < infoRetryAt[i]) continue;
+                    if (infoAttempts[i] >= 3) { failure = fmt::format("Song {} has no downloadable audio URL.", i); return; }
+                    requestedInfo.insert(i); ++infoAttempts[i]; ++pendingAssets;
+                    music->getSongInfo(i, true);
+                    continue;
+                }
+            }
+            if (Clock::now() < songRetryAt[i]) continue;
+            requestedSongs.insert(i); ++songAttempts[i]; ++pendingAssets;
+            music->downloadSong(i);
         }
         for (int i : sounds) {
             if (pendingAssets >= 3) break;
             if (music->isSFXDownloaded(i) || requestedSounds.contains(i) || music->isDLActive(music->getSFXDownloadKey(i))) continue;
-            requestedSounds.insert(i); ++pendingAssets; music->downloadSFX(i);
-            if (!current) return;
+            if (Clock::now() < soundRetryAt[i]) continue;
+            requestedSounds.insert(i); ++soundAttempts[i]; ++pendingAssets; music->downloadSFX(i);
         }
     }
 };

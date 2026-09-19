@@ -1,3 +1,11 @@
+# v0.4.3
+
+- Fetch song metadata before downloading map music; include all listed songs and SFX.
+- Retry transient map/audio failures and report the failing asset ID.
+- Allow larger multi-song downloads to complete before readying up.
+- Avoid removing music delegates inside native callback iteration.
+- Remove room-row block borders and place game rules beside the room name.
+
 # v0.4.2
 
 - Replace inactive Ready with Choose Map or Download until its prerequisites are met.

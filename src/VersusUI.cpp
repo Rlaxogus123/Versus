@@ -101,30 +101,6 @@ void styleInput(TextInput* input) {
     input->getBGSprite()->setOpacity(230);
 }
 
-// One draw node per row: small beveled blocks, with no extra touch handlers.
-void blueBlockBorder(CCNode* parent, CCSize size) {
-    auto* border = CCDrawNode::create();
-    auto block = [border](float x, float y, float w, float h, bool sky) {
-        CCPoint points[] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
-        border->drawPolygon(points, 4, sky ? ccColor4F{.24f, .73f, 1.f, 1.f} : ccColor4F{.08f, .34f, .78f, 1.f},
-            .35f, {.035f, .13f, .34f, 1.f});
-        border->drawSegment({x + .5f, y + h - .5f}, {x + w - .5f, y + h - .5f}, .4f,
-            {.7f, .94f, 1.f, .8f});
-    };
-    int const count = std::max(2, static_cast<int>((size.width - 12.f) / 22.f));
-    float const step = (size.width - 12.f) / count;
-    for (int i = 0; i < count; ++i) {
-        block(6.f + i * step, size.height - 3.f, step - 1.f, 2.5f, i % 2 == 0);
-        block(6.f + i * step, .5f, step - 1.f, 2.5f, i % 2 != 0);
-    }
-    for (float x : {1.f, size.width - 5.f}) {
-        block(x, 1.f, 4.f, 6.f, true);
-        block(x, size.height - 7.f, 4.f, 6.f, true);
-        block(x + .5f, 8.f, 3.f, std::max(2.f, size.height - 16.f), false);
-    }
-    parent->addChild(border, 3);
-}
-
 SimplePlayer* player(CCNode* parent, PlayerProfile const& profile, CCPoint point, float scale) {
     auto* manager = GameManager::sharedState();
     int const count = manager ? std::max(1, manager->countForType(IconType::Cube)) : 1;
@@ -857,7 +833,6 @@ class LobbyLayer : public SceneLayer {
             gradient->setContentSize({rowWidth - 8.f, rowHeight - 6.f});
             gradient->setPosition({4.f, 3.f});
             rowSprite->addChild(gradient, -1);
-            blueBlockBorder(rowSprite, rowSprite->getContentSize());
             auto* trim = CCDrawNode::create();
             trim->drawSegment({5.f, 7.f}, {5.f, rowHeight - 7.f}, 1.4f,
                 {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .95f});
@@ -873,18 +848,25 @@ class LobbyLayer : public SceneLayer {
                 rowSprite->addChild(lock, 2);
             }
             player(rowSprite, room.host, {34.f, rowHeight / 2.f}, .60f);
-            label(rowSprite, room.host.name, {57.f, rowHeight * .76f}, .32f,
-                m_listWidth - 149.f, {255, 255, 255}, true);
-            label(rowSprite, room.name, {57.f, rowHeight * .43f}, .39f,
-                m_listWidth - 149.f, kIce, true, "chatFont.fnt");
-            float const badgeWidth = m_listWidth - 151.f;
+            // Two text lines for names; rules occupy their own column.
+            float const infoWidth = rowWidth - 122.f;
+            float const nameWidth = infoWidth * .53f;
+            float const badgeWidth = infoWidth - nameWidth - 7.f;
+            float const badgeX = 57.f + nameWidth + 7.f;
+            label(rowSprite, room.host.name, {57.f, rowHeight * .68f}, .32f,
+                nameWidth, {255, 255, 255}, true);
+            label(rowSprite, room.name, {57.f, rowHeight * .31f}, .39f,
+                nameWidth, kIce, true, "chatFont.fnt");
             auto* modeBadge = NineSlice::create("square02b_001.png");
-            modeBadge->setContentSize({badgeWidth, std::max(8.f, rowHeight * .25f)});
+            modeBadge->setContentSize({badgeWidth, rowHeight - 10.f});
             modeBadge->setColor(room.rules.mode == 1 ? ccc3(23, 68, 119) : ccc3(7, 56, 85));
-            modeBadge->setPosition({57.f + badgeWidth / 2.f, rowHeight * .15f});
+            modeBadge->setPosition({badgeX + badgeWidth / 2.f, rowHeight / 2.f});
             rowSprite->addChild(modeBadge);
-            label(rowSprite, rulesText(room.rules), {61.f, rowHeight * .15f}, .30f,
-                badgeWidth - 8.f, accent, true, "chatFont.fnt");
+            label(rowSprite, room.rules.mode == 1 ? "PERCENT" : "ATTEMPTS",
+                {badgeX + badgeWidth / 2.f, rowHeight * .66f}, .23f, badgeWidth - 8.f, accent);
+            label(rowSprite, rulesText(room.rules),
+                {badgeX + badgeWidth / 2.f, rowHeight * .32f}, .33f,
+                badgeWidth - 8.f, kIce, false, "chatFont.fnt");
             auto* statusBadge = NineSlice::create("square02b_001.png");
             statusBadge->setContentSize({48.f, rowHeight - 9.f});
             statusBadge->setColor(room.started ? ccc3(79, 56, 31) : full ? ccc3(24, 41, 64) : ccc3(10, 66, 61));
