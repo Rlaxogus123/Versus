@@ -1,3 +1,12 @@
+# v0.4.4
+
+- Show the winner name and both players' best percentages in result animations.
+- Save results before returning both players to the same room for a rematch.
+- Add opponent icons and detailed match history, per-attempt comparisons, map links and ID copying.
+- Replace camera spectating with a local endless runner using the opponent icon and live match stats.
+- Add tap/hold jumps, scrolling GD scenery, spikes and flying monsters without position traffic.
+- Extend Firebase rules for private attempt history and independent result acknowledgements.
+
 # v0.4.3
 
 - Fetch song metadata before downloading map music; include all listed songs and SFX.

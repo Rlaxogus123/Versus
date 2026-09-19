@@ -1,5 +1,6 @@
 #include "BattleSession.hpp"
 #include "MapCache.hpp"
+#include "SpectatorRunner.hpp"
 #include "VersusService.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
@@ -36,14 +37,16 @@ public:
     bool host = false, active = false, releasing = false, startingTurn = false;
     bool reporting = false, dirty = false, forcingQuit = false, mainMenu = false;
     bool quitDialog = false, warnedPause = false, leaving = false;
-    bool finished = false, spectating = false;
+    bool finished = false, spectating = false, returning = false;
+    int runBest = 0, lastRecordedRun = 0;
+    float returnRetry = 0.f;
+    WeakRef<SpectatorRunner> runner;
     uint64_t generation = 0;
     float reportTimer = 0.f, uiTimer = 0.f;
     int64_t revealUntil = 0;
     Clock::time_point resultBegan;
     WeakRef<CCNode> hud;
-    WeakRef<SimplePlayer> ghost;
-    WeakRef<CCLabelBMFont> leftStats, rightStats, status;
+    WeakRef<CCLabelBMFont> leftStats, rightStats, status, returnStatus;
 
     static Session& get() {
         static auto* session = [] {
@@ -63,7 +66,7 @@ public:
         auto const& room = Service::get().room();
         return room && room->id == roomID && room->battle && room->battle->id == battleID;
     }
-    bool sequence() const { return rules.sequence && !rules.practice; }
+    bool sequence() const { return rules.mode == 0 && rules.sequence && !rules.practice; }
     bool done() const {
         return local.forfeited || local.cleared ||
             (rules.mode == 0 && !rules.practice && local.attemptsUsed >= rules.attempts);
@@ -115,9 +118,6 @@ public:
                 CCRemoveSelf::create(), nullptr));
         }
         layer->addChild(root, 100005); hud = root;
-        auto* remote = icon(host ? guestProfile : hostProfile, 1.f);
-        remote->setVisible(false); remote->setID("spectator-player"_spr);
-        layer->m_objectLayer->addChild(remote, 10000); ghost = remote;
     }
     void beginSession(PlayLayer* layer) {
         auto const& room = Service::get().room();
@@ -125,6 +125,7 @@ public:
         ++generation;
         active = true; finished = false; leaving = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
+        returning = false; returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         host = Service::get().isHost(); uid = Service::get().profile().uid;
         roomID = room->id; battleID = room->battle->id; rules = room->rules;
         firstUid = room->battle->firstUid;
@@ -149,17 +150,25 @@ public:
         int current = percent(layer);
         if (current != local.currentPercent) { local.currentPercent = current; dirty = true; }
         local.bestPercent = std::max(local.bestPercent, current);
+        runBest = std::max(runBest, current);
         if (rules.mode == 1 && current >= rules.targetPercent) {
             // Reaching the percentage target ends this run without claiming a
             // full level clear. The other player may still tie on their current run.
+            saveAttempt();
             local.inAttempt = false; local.spectating = true; spectating = true; dirty = true;
             FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         }
+    }
+    void saveAttempt() {
+        if (local.runNumber <= lastRecordedRun || local.runNumber <= 0) return;
+        Service::get().recordAttempt(local.runNumber, runBest);
+        lastRecordedRun = local.runNumber;
     }
     void death(PlayLayer* layer) {
         if (!owns(layer) || !local.inAttempt || blocked()) return;
         local.currentPercent = percent(layer);
         local.bestPercent = std::max(local.bestPercent, local.currentPercent);
+        runBest = std::max(runBest, local.currentPercent); saveAttempt();
         ++local.attemptsUsed; local.inAttempt = false; dirty = true; reportTimer = 0.f;
         if (done()) {
             spectating = true; local.spectating = true;
@@ -169,6 +178,7 @@ public:
     void clear(PlayLayer* layer) {
         if (!owns(layer) || local.cleared) return;
         local.currentPercent = 100; local.bestPercent = 100; local.cleared = true;
+        runBest = 100; saveAttempt();
         local.inAttempt = false; local.spectating = true; spectating = true; dirty = true; reportTimer = 0.f;
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
     }
@@ -182,7 +192,7 @@ public:
     void resetAfter(PlayLayer* layer) {
         if (!owns(layer) || releasing || done()) return;
         local.currentPercent = 0; local.inAttempt = true; local.spectating = false; spectating = false;
-        ++local.runNumber; dirty = true; reportTimer = 0.f;
+        ++local.runNumber; runBest = 0; dirty = true; reportTimer = 0.f;
     }
     void pause(PlayLayer* layer, bool value) {
         if (!owns(layer) || finished || local.paused == value) return;
@@ -191,14 +201,7 @@ public:
     }
     void report(bool force = false) {
         if (!active || !sameBattle() || reporting || (!dirty && !force)) return;
-        auto layer = play.lock();
-        bool position = rules.mode == 0 && other.spectating && !local.spectating && local.inAttempt;
-        if (position && layer && layer->m_player1) {
-            auto point = layer->m_player1->getPosition();
-            local.x = point.x; local.y = point.y;
-            local.cameraX = layer->m_gameState.m_cameraPosition.x;
-            local.cameraY = layer->m_gameState.m_cameraPosition.y;
-        }
+        bool position = false; // Local spectator runner needs only progress.
         reporting = true; dirty = false;
         auto epoch = generation;
         Service::get().reportBattle(local, position, [this, epoch](bool success, std::string) {
@@ -209,6 +212,7 @@ public:
     }
     void forfeit() {
         if (!active || leaving) return;
+        saveAttempt();
         local.forfeited = true; local.inAttempt = false; local.paused = false;
         local.pausedAt = 0; local.spectating = true; spectating = true;
         dirty = true; reportTimer = 0.f; leaving = true;
@@ -218,6 +222,7 @@ public:
     }
     bool askQuit(PlayLayer* layer) {
         if (!owns(layer) || forcingQuit) return false;
+        if (finished) { exitAfterResult(); return true; }
         if (quitDialog || leaving) return true;
         quitDialog = true;
         auto epoch = generation;
@@ -231,7 +236,13 @@ public:
     }
     void endVisual(BattleInfo const& info) {
         if (finished || leaving) return;
+        if (local.inAttempt) {
+            auto const& final = host ? info.host : info.guest;
+            runBest = std::min(runBest, final.bestPercent);
+            saveAttempt();
+        }
         finished = true; resultBegan = Clock::now();
+        if (auto game = runner.lock()) game->removeFromParent(); runner = nullptr;
         auto owner = play.lock(); if (!owner) return;
 #if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
         PlatformToolbox::showCursor();
@@ -242,7 +253,23 @@ public:
         auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 220)); root->addChild(shade);
         std::string outcome = info.draw ? "DRAW" : info.winnerUid == uid ? "VICTORY" : "DEFEAT";
         auto* title = CCLabelBMFont::create(outcome.c_str(), "bigFont.fnt");
-        title->setPosition({window.width / 2.f, window.height / 2.f + 60.f}); root->addChild(title);
+        title->setPosition({window.width / 2.f, window.height / 2.f + 94.f}); title->setScale(.75f); root->addChild(title);
+        auto resultLabel = [root, window](std::string text, float x, float y, float width, float scale) {
+            auto* value = CCLabelBMFont::create(text.c_str(), "chatFont.fnt");
+            value->setScale(std::min(scale, width / std::max(1.f, value->getContentSize().width)));
+            value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); root->addChild(value, 5); return value;
+        };
+        auto winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
+        resultLabel(info.draw ? "Draw - equal result" : winnerName + " wins!", 0.f, 65.f, window.width-40.f, .95f);
+        resultLabel(hostProfile.name, -95.f, -56.f, 170.f, .85f);
+        resultLabel(guestProfile.name, 95.f, -56.f, 170.f, .85f);
+        resultLabel(fmt::format("{}%", info.host.bestPercent), -95.f, -77.f, 170.f, 1.1f);
+        resultLabel(fmt::format("{}%", info.guest.bestPercent), 95.f, -77.f, 170.f, 1.1f);
+        if (rules.practice && rules.mode == 0) {
+            resultLabel(fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -96.f, 170.f, .6f);
+            resultLabel(fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -96.f, 170.f, .6f);
+        }
+        returnStatus = resultLabel("Returning to the room...", 0.f, -118.f, window.width-40.f, .65f);
         if (!info.draw) {
             auto const& loserState = info.winnerUid == hostProfile.uid ? info.guest : info.host;
             if (loserState.forfeited || loserState.pausedAt > 0) {
@@ -300,33 +327,45 @@ public:
         }
         owner->addChild(root, 100010);
     }
-    void exitToMenu() {
-        if (!active || forcingQuit || Service::get().busy()) return;
-        forcingQuit = true; mainMenu = true;
-        auto owner = play.lock();
-        Service::get().leaveRoom([](bool, std::string) {});
-        if (owner) owner->onQuit();
-        active = false;
+    void exitAfterResult() {
+        if (!active || forcingQuit || returning || Service::get().busy()) return;
+        auto quit = [this] {
+            forcingQuit = true; mainMenu = leaving;
+            auto owner = play.lock();
+            if (leaving) Service::get().leaveRoom([](bool, std::string) {});
+            if (owner) owner->onQuit();
+            active = false;
+        };
+        if (leaving || !Service::get().room() || !Service::get().room()->battle) { quit(); return; }
+        returning = true; auto epoch = generation;
+        Service::get().acknowledgeResult([this, epoch, quit](bool ok, std::string detail) {
+            if (epoch != generation) return;
+            returning = false;
+            if (ok) quit();
+            else { returnRetry = 1.f; label(returnStatus, detail); }
+        });
     }
-    void updateSpectator(PlayLayer* layer, float dt) {
-        bool show = spectating && rules.mode == 0 && other.inAttempt && !finished && !leaving;
-        auto remote = ghost.lock(); if (remote) remote->setVisible(show);
-        if (!show || !remote) return;
-        layer->m_player1->setVisible(false);
-        if (layer->m_player2) layer->m_player2->setVisible(false);
-        auto alpha = std::min(1.f, dt * 14.f);
-        CCPoint target {static_cast<float>(other.x), static_cast<float>(other.y)};
-        remote->setPosition(remote->getPosition() + (target - remote->getPosition()) * alpha);
-        auto camera = layer->m_gameState.m_cameraPosition;
-        CCPoint targetCamera {static_cast<float>(other.cameraX), static_cast<float>(other.cameraY)};
-        camera = camera + (targetCamera - camera) * alpha;
-        layer->m_gameState.m_cameraPosition = camera;
-        layer->m_objectLayer->setPosition({-camera.x * layer->m_objectLayer->getScaleX(), -camera.y * layer->m_objectLayer->getScaleY()});
-        layer->updateVisibility(0.f);
+    void updateSpectator(PlayLayer*, float) {
+        bool show = spectating && !finished && !leaving && Service::get().serverNow() >= revealUntil;
+        auto game = runner.lock();
+        if (show && !game) {
+            auto owner = play.lock();
+            if (owner) {
+                auto* created = SpectatorRunner::create(host ? guestProfile : hostProfile, rules);
+                if (created) { owner->addChild(created, 100006); runner = created; game = runner.lock(); }
+            }
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+            PlatformToolbox::showCursor();
+#endif
+        }
+        if (game) {
+            if (show) game->setOpponentState(other);
+            else { game->removeFromParent(); runner = nullptr; }
+        }
     }
     std::string stats(BattlePlayerState const& state) const {
         if (state.forfeited) return "Forfeit";
-        auto result = rules.mode == 0 ? rules.practice ? fmt::format("{} attempts", state.attemptsUsed + 1) :
+        auto result = rules.mode == 0 ? rules.practice ? fmt::format("{} attempts", std::max(1, state.runNumber)) :
             fmt::format("{} left", std::max(0, rules.attempts - state.attemptsUsed)) : fmt::format("{}%", state.bestPercent);
         if (rules.mode == 0) result += fmt::format("  {}%", state.bestPercent);
         if (state.paused) result += "  Paused";
@@ -335,10 +374,14 @@ public:
     void update(float dt) override {
         if (!active) return;
         auto owner = play.lock(); if (!owner) { active = false; return; }
-        if ((finished || leaving) && Clock::now() - resultBegan >= std::chrono::seconds(3)) { exitToMenu(); return; }
+        returnRetry -= dt;
+        if ((finished || leaving) && Clock::now() - resultBegan >= std::chrono::seconds(3)) {
+            if (returnRetry <= 0.f) exitAfterResult(); return;
+        }
         if (!sameBattle()) {
             if (!finished && !leaving) {
                 BattleInfo result; result.winnerUid = uid;
+                result.host = host ? local : other; result.guest = host ? other : local;
                 endVisual(result);
             }
             return;
@@ -360,7 +403,7 @@ public:
                 owner->resetLevel();
                 startingTurn = false;
                 owner->m_player1->setVisible(true);
-                if (auto remote = ghost.lock()) remote->setVisible(false);
+                if (auto game = runner.lock()) game->setVisible(false);
                 owner->startGame();
                 FMODAudioEngine::sharedEngine()->resumeAllMusic();
             }
@@ -372,7 +415,7 @@ public:
         updateSpectator(owner.data(), dt);
         reportTimer -= dt;
         if (reportTimer <= 0.f) {
-            bool stream = rules.mode == 0 && other.spectating && local.inAttempt && !spectating;
+            bool stream = false;
             reportTimer = stream ? 1.f / 7.f : .5f;
             report(stream || local.paused);
         }

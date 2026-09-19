@@ -771,6 +771,71 @@ try {
     $room.hostSeen = Timestamp
     Assert-Status 'opponent may finalize 30-second pause loss' (Put-Room pausecase host $room)
 
+
+    # Detailed history snapshots, return acknowledgements, and private attempt logs.
+    $room = Get-Room practicecase
+    $match = $room.battle.id
+    Set-Field $room.battle hostReturned $true
+    Assert-Status 'cannot acknowledge before history saved' (Put-Room practicecase host $room) @(401,403)
+    $room = Get-Room practicecase
+    foreach ($uid in @('host','guest')) {
+        $isHost = $uid -eq 'host'
+        $ownProfile = if ($isHost) { $room.host } else { $room.guest }
+        $otherProfile = if ($isHost) { $room.guest } else { $room.host }
+        $ownStats = if ($isHost) { $room.battle.host } else { $room.battle.guest }
+        $otherStats = if ($isHost) { $room.battle.guest } else { $room.battle.host }
+        $detail = @{ roomId='practicecase'; opponentName=$otherProfile.name; levelName=$room.level.name; winnerName='guest'; result=$(if($isHost){'loss'}else{'win'}); playedAt=(Timestamp); levelId=$room.level.id; self=$ownProfile; opponent=$otherProfile; selfStats=$ownStats; opponentStats=$otherStats; rules=$room.rules }
+        $forged = $detail | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+        $forged.opponent.icon = 999
+        Assert-Status "$uid cannot forge opponent icon" (Send-Request PUT "versus-v1/history/$uid/$match" $forged -Uid $uid) @(401,403)
+        $forged = $detail | ConvertTo-Json -Depth 100 | ConvertFrom-Json
+        $forged.selfStats.bestPercent = 99
+        Assert-Status "$uid cannot forge final percent" (Send-Request PUT "versus-v1/history/$uid/$match" $forged -Uid $uid) @(401,403)
+        Assert-Status "$uid archives detailed match" (Send-Request PUT "versus-v1/history/$uid/$match" $detail -Uid $uid)
+        Assert-Status "$uid retries archive with null etag" (Send-Request PUT "versus-v1/history/$uid/$match" $detail -Uid $uid -ETag 'null_etag') @(412)
+
+    }
+    Assert-Status 'own archive receipt readable after lost response' (Send-Request GET "versus-v1/history/host/$match" -Uid host)
+    Assert-Status 'opponent archive receipt private' (Send-Request GET "versus-v1/history/host/$match" -Uid guest) @(401,403)
+    $attempt = @{ roomId='practicecase'; run=1; percent=30; endedAt=(Timestamp) }
+    Assert-Status 'host records first attempt' (Send-Request PUT "versus-v1/matchAttempts/$match/host/r1" $attempt -Uid host)
+    $attempt.percent = 29
+    Assert-Status 'recorded attempt immutable' (Send-Request PUT "versus-v1/matchAttempts/$match/host/r1" $attempt -Uid host) @(401,403)
+    $attempt.percent = 100; $attempt.run = 2
+    Assert-Status 'host records clear attempt' (Send-Request PUT "versus-v1/matchAttempts/$match/host/r2" $attempt -Uid host)
+    Assert-Status 'guest cannot write host attempt' (Send-Request PUT "versus-v1/matchAttempts/$match/host/r2" $attempt -Uid guest) @(401,403)
+    $attempt.run=3
+    Assert-Status 'cannot invent unused attempt' (Send-Request PUT "versus-v1/matchAttempts/$match/host/r3" $attempt -Uid host) @(401,403)
+    $attempt.run=1
+    Assert-Status 'guest records own attempt' (Send-Request PUT "versus-v1/matchAttempts/$match/guest/r1" $attempt -Uid guest)
+    Assert-Status 'attempt key matches run' (Send-Request PUT "versus-v1/matchAttempts/$match/guest/r2" $attempt -Uid guest) @(401,403)
+    $query='orderBy=%22run%22&startAt=1&endAt=10&limitToFirst=10'
+    Assert-Status 'own attempt page' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid host -Query $query)
+    Assert-Status 'opponent attempt page' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid guest -Query $query)
+    Assert-Status 'outsider cannot read attempt page' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid third -Query $query) @(401,403)
+    Assert-Status 'unbounded attempts denied' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid host) @(401,403)
+    $room = Get-Room practicecase
+    Set-Field $room.battle guestReturned $true
+    Assert-Status 'host cannot acknowledge opponent result' (Put-Room practicecase host $room) @(401,403)
+    $room = Get-Room practicecase
+    Set-Field $room.battle hostReturned $true
+    Assert-Status 'host returns after archive saved' (Put-Room practicecase host $room)
+    $room = Get-Room practicecase
+    Set-Field $room.battle guestReturned $true
+    Assert-Status 'guest returns after archive saved' (Put-Room practicecase guest $room)
+    $room = Get-Room practicecase
+    Remove-Field $room.battle hostReturned
+    Assert-Status 'acknowledgement cannot be removed' (Put-Room practicecase guest $room) @(401,403)
+
+    $room = Get-Room practicecase
+    $room.started=$false; $room.hostReady=$false; $room.guestReady=$false
+    Remove-Field $room launch
+    Assert-Status 'same room resets for rematch' (Put-Room practicecase host $room)
+    $room = Get-Room practicecase
+    Assert-True 'both players and map retained after result' ($room.host.uid -eq 'host' -and $room.guest.uid -eq 'guest' -and $room.level.id -gt 0 -and !$room.started)
+    Assert-Status 'history still authorizes opponent attempts after reset' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid guest -Query $query)
+    Assert-Status 'delayed own attempt remains writable after reset' (Send-Request PUT "versus-v1/matchAttempts/$match/guest/r1" $attempt -Uid guest)
+
     $history = @{}
     for ($i = 1; $i -le 12; $i++) {
         $history["match$i"] = @{ playedAt = $i; opponentName = 'guest'; levelName = 'Test'; winnerName = 'host'; result = 'win' }

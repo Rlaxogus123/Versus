@@ -7,6 +7,8 @@
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CreatorLayer.hpp>
+#include <Geode/binding/LevelInfoLayer.hpp>
+#include <Geode/binding/GJGameLevel.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJDifficultySprite.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
@@ -438,6 +440,80 @@ public:
     }
 };
 
+class MatchDetailPopup : public Popup {
+    MatchRecord m_match;
+    CCNode* m_rows = nullptr;
+    CCLabelBMFont* m_pageLabel = nullptr;
+    CCMenuItemSpriteExtra *m_previous = nullptr, *m_next = nullptr;
+    int m_page = 0, m_generation = 0;
+    bool init(MatchRecord match) {
+        if (!Popup::init(420.f, 294.f, "GJ_square02.png")) return false;
+        m_match = std::move(match);
+        setTitle("Match Details", "bigFont.fnt", .6f);
+        label(m_mainLayer, m_match.levelName, {210.f, 249.f}, .44f, 270.f, kIce);
+        auto* view = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onView), "View Map", {119.f, 224.f}, .4f);
+        auto* copy = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onCopy), "Copy ID", {299.f, 224.f}, .4f);
+        enabled(view, m_match.levelId > 0); enabled(copy, m_match.levelId > 0);
+        label(m_mainLayer, m_match.detailed ? rulesText(m_match.rules) : "Details unavailable for this older match",
+            {210.f, 203.f}, .55f, 380.f, kIce, false, "chatFont.fnt");
+        if (m_match.detailed) {
+            player(m_mainLayer, m_match.self, {88.f, 174.f}, .55f);
+            player(m_mainLayer, m_match.opponent, {285.f, 174.f}, .55f);
+            label(m_mainLayer, m_match.self.name, {107.f, 180.f}, .3f, 110.f, ccWHITE, true);
+            label(m_mainLayer, m_match.opponent.name, {304.f, 180.f}, .3f, 100.f, ccWHITE, true);
+            label(m_mainLayer, fmt::format("Best {}%", m_match.selfStats.bestPercent), {107.f, 167.f}, .5f, 110.f, kIce, true, "chatFont.fnt");
+            label(m_mainLayer, fmt::format("Best {}%", m_match.opponentStats.bestPercent), {304.f, 167.f}, .5f, 100.f, kIce, true, "chatFont.fnt");
+        }
+        label(m_mainLayer, m_match.result == "draw" ? "DRAW" : m_match.winnerName + " wins", {210.f, 149.f}, .45f, 370.f, kIce, false, "chatFont.fnt");
+        m_rows = CCNode::create(); m_mainLayer->addChild(m_rows);
+        m_previous = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onPrevious), "<", {153.f, 21.f}, .4f);
+        m_next = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onNext), ">", {267.f, 21.f}, .4f);
+        m_pageLabel = label(m_mainLayer, "", {210.f, 21.f}, .3f, 75.f, kIce);
+        fetch(); return true;
+    }
+    void fetch() {
+        m_rows->removeAllChildrenWithCleanup(true);
+        int count = std::max(m_match.selfStats.runNumber, m_match.opponentStats.runNumber);
+        int pages = std::max(1, (count + 9) / 10); m_page = std::clamp(m_page, 0, pages-1);
+        m_pageLabel->setString(fmt::format("{} / {}", m_page+1, pages).c_str());
+        enabled(m_previous, m_match.detailed && m_page > 0); enabled(m_next, m_match.detailed && m_page+1 < pages);
+        if (!m_match.detailed) return;
+        label(m_rows, "Loading attempts...", {210.f, 92.f}, .5f, 360.f, kIce, false, "chatFont.fnt");
+        int generation = ++m_generation;
+        Service::get().fetchAttempts(m_match, m_page*10+1,
+            [self=WeakRef<MatchDetailPopup>(this), generation](std::vector<AttemptRecord> own, std::vector<AttemptRecord> other, std::string detail) {
+                auto owner=self.lock(); if(!owner || owner->m_generation!=generation)return;
+                owner->m_rows->removeAllChildrenWithCleanup(true);
+                if(!detail.empty()) { label(owner->m_rows, "Records unavailable. Reopen to retry.", {210.f,92.f},.48f,365.f,kIce,false,"chatFont.fnt");return; }
+                auto lookup=[](auto const& list,int run)->std::string {for(auto const& a:list)if(a.run==run)return fmt::format("{}%",a.percent);return "--";};
+                int maxRun=std::max(owner->m_match.selfStats.runNumber,owner->m_match.opponentStats.runNumber);
+                for(int row=0;row<10;++row) {
+                    int run=owner->m_page*10+row+1; if(run>maxRun)break;
+                    float y=135.f-row*10.5f;
+                    auto* bg=panel(owner->m_rows,{20.f,y-5.f},{380.f,10.f},false);
+                    label(bg,fmt::format("Attempt {}",run),{7.f,5.f},.42f,95.f,kMuted,true,"chatFont.fnt");
+                    label(bg,lookup(own,run),{133.f,5.f},.46f,75.f,ccWHITE,false,"chatFont.fnt");
+                    label(bg,lookup(other,run),{330.f,5.f},.46f,75.f,ccWHITE,false,"chatFont.fnt");
+                }
+            });
+    }
+    void onPrevious(CCObject*) { if(m_page>0){--m_page;fetch();} }
+    void onNext(CCObject*) { ++m_page;fetch(); }
+    void onCopy(CCObject*) { clipboard::write(fmt::format("{}",m_match.levelId)); Notification::create("Level ID copied",NotificationIcon::Success)->show(); }
+    void onView(CCObject*) {
+        if(m_match.levelId<=0 || m_match.levelId>std::numeric_limits<int>::max())return;
+        auto* level=GJGameLevel::create(); level->m_levelID=static_cast<int>(m_match.levelId);
+        level->m_levelName=m_match.levelName;level->m_levelType=GJLevelType::Saved;
+        auto* scene=LevelInfoLayer::scene(level,false);
+        if(scene) CCDirector::sharedDirector()->pushScene(CCTransitionFade::create(.2f,scene));
+    }
+public:
+    static MatchDetailPopup* create(MatchRecord match) {
+        auto* result=new MatchDetailPopup;
+        if(result->init(std::move(match))){result->autorelease();return result;}delete result;return nullptr;
+    }
+};
+
 class HistoryPopup : public Popup {
     CCNode* m_rows = nullptr;
     CCLabelBMFont* m_status = nullptr;
@@ -482,21 +558,30 @@ class HistoryPopup : public Popup {
         enabled(m_next, m_page + 1 < pages);
         m_status->setVisible(m_matches.empty());
         m_status->setString("No matches yet");
+        auto* rowsMenu = menu(m_rows);
         for (int row = 0; row < kHistoryPageSize; ++row) {
             size_t const index = static_cast<size_t>(m_page * kHistoryPageSize + row);
             if (index >= m_matches.size()) break;
             auto const& match = m_matches[index];
-            auto* cell = panel(m_rows, {19.f, 178.f - row * 32.f}, {352.f, 29.f}, false);
+            auto* cell = CCSprite::create(); cell->setContentSize({352.f, 29.f});
+            panel(cell, {0.f,0.f}, {352.f,29.f}, false);
+            auto* item = CCMenuItemSpriteExtra::create(cell, this, menu_selector(HistoryPopup::onDetails));
+            item->setPosition({195.f,192.5f-row*32.f});item->setTag(static_cast<int>(index));rowsMenu->addChild(item);
             auto result = match.result;
             std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::toupper(c); });
             auto const resultColor = result == "WIN" ? ccc3(130, 255, 165) : result == "LOSS" ? ccc3(255, 160, 160) : kIce;
             label(cell, result.empty() ? "PLAYED" : result, {8.f, 15.f}, .29f, 49.f, resultColor, true);
-            label(cell, "vs " + match.opponentName, {64.f, 20.f}, .32f, 160.f, {255, 255, 255}, true);
+            label(cell, "vs " + match.opponentName, {64.f, 20.f}, .32f, 134.f, {255, 255, 255}, true);
+            if (match.detailed) player(cell, match.opponent, {219.f, 15.f}, .5f);
             label(cell, match.levelName, {64.f, 8.f}, .42f, 165.f, kIce, true, "chatFont.fnt");
             label(cell, "Winner", {287.f, 21.f}, .32f, 100.f, kMuted, false, "chatFont.fnt");
             label(cell, match.winnerName.empty() ? "Draw" : match.winnerName,
                 {287.f, 10.f}, .27f, 102.f);
         }
+    }
+    void onDetails(CCObject* sender) {
+        int index=sender->getTag();
+        if(index>=0 && index<static_cast<int>(m_matches.size())) if(auto* popup=MatchDetailPopup::create(m_matches[index]))popup->show();
     }
     void onPrevious(CCObject*) { if (m_page > 0) { --m_page; render(); } }
     void onNext(CCObject*) { ++m_page; render(); }
@@ -1274,7 +1359,7 @@ class RoomLayer : public SceneLayer {
             actions->addChild(item);
             enabled(item, room.guest.has_value() && !room.started);
         }
-        std::string const status = m_pending ? "Updating room..." : room.started ? "Preparing both players..." :
+        std::string const status = m_pending ? "Updating room..." : room.battle && room.battle->finishedAt ? "Waiting for both players to return..." : room.started ? "Preparing both players..." :
             m_downloading ? "Downloading the selected map and audio..." : !m_cacheError.empty() ? m_cacheError + " Tap Download to retry." :
             !room.level.id ? "Host: choose a map and game rules" :
             !myReady ? "Press Ready after your map finishes downloading" :

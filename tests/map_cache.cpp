@@ -1,6 +1,7 @@
 #include "../src/MapCache.cpp"
 #include <iostream>
 #include <thread>
+namespace versus { void preloadRunnerAssets() {} }
 void check(bool value,char const* message) { if(!value) throw std::runtime_error(message); std::cout<<"PASS "<<message<<'\n'; }
 int main() {
  auto& cache=Cache::get(); auto* gm=GameLevelManager::sharedState(); auto* music=MusicDownloadManager::sharedState();

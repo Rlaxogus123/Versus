@@ -246,6 +246,7 @@ void ensureMapCached(int64_t id, Done callback) {
     Cache::get().add(static_cast<int>(id), std::move(callback));
 }
 void preloadBattleAssets() {
+    preloadRunnerAssets();
     CCLabelBMFont::create("VERSUS 0123456789%", "bigFont.fnt");
     CCLabelBMFont::create("Starting / Spectating / Paused", "chatFont.fnt");
     CCSprite::createWithSpriteFrameName("GJ_versusBtn_001.png");

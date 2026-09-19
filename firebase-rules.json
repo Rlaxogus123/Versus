@@ -190,7 +190,7 @@
             ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || (newData.parent().child('guest/uid').val() == auth.uid && newData.val() == now && newData.val() >= data.val() + 1000 && newData.parent().child('emote/uid').val() == auth.uid && newData.parent().child('emote/at').val() == now))"
           },
           "battle": {
-            ".validate": "newData.hasChildren(['id', 'firstUid', 'activeUid', 'firstReachedUid', 'opponentRunAtFirst', 'winnerUid', 'draw', 'finishedAt', 'host', 'guest']) && newData.child('id').val() == newData.parent().child('launch/id').val() && newData.parent().child('started').val() == true && (newData.child('finishedAt').val() == 0 ? (newData.child('winnerUid').val() == '' && newData.child('draw').val() == false) : ((newData.child('draw').val() == true && newData.child('winnerUid').val() == '' && ((newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() == newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() == newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && ((newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('guest/runNumber').val() == newData.child('opponentRunAtFirst').val()) || (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('host/runNumber').val() == newData.child('opponentRunAtFirst').val()))))) || (newData.child('draw').val() == false && ((newData.child('winnerUid').val() == newData.parent().child('host/uid').val() && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() < newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() > newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('guest/inAttempt').val() == false || newData.child('guest/runNumber').val() != newData.child('opponentRunAtFirst').val()))))) || (newData.child('winnerUid').val() == newData.parent().child('guest/uid').val() && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('guest/cleared').val() == true && newData.child('host/cleared').val() == true && newData.child('guest/attemptsUsed').val() < newData.child('host/attemptsUsed').val()) : (((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('guest/bestPercent').val() > newData.child('host/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('host/inAttempt').val() == false || newData.child('host/runNumber').val() != newData.child('opponentRunAtFirst').val())))))))))",
+            ".validate": "newData.hasChildren(['id', 'firstUid', 'activeUid', 'firstReachedUid', 'opponentRunAtFirst', 'winnerUid', 'draw', 'finishedAt', 'host', 'guest']) && newData.child('id').val() == newData.parent().child('launch/id').val() && newData.parent().child('started').val() == true && (newData.child('finishedAt').val() == 0 ? (newData.child('winnerUid').val() == '' && newData.child('draw').val() == false) : ((newData.child('draw').val() == true && newData.child('winnerUid').val() == '' && ((newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() == newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() == newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && ((newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('guest/runNumber').val() == newData.child('opponentRunAtFirst').val()) || (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('host/runNumber').val() == newData.child('opponentRunAtFirst').val()))))) || (newData.child('draw').val() == false && ((newData.child('winnerUid').val() == newData.parent().child('host/uid').val() && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() < newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() > newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('guest/inAttempt').val() == false || newData.child('guest/runNumber').val() != newData.child('opponentRunAtFirst').val()))))) || (newData.child('winnerUid').val() == newData.parent().child('guest/uid').val() && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('guest/cleared').val() == true && newData.child('host/cleared').val() == true && newData.child('guest/attemptsUsed').val() < newData.child('host/attemptsUsed').val()) : (((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('guest/bestPercent').val() > newData.child('host/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('host/inAttempt').val() == false || newData.child('host/runNumber').val() != newData.child('opponentRunAtFirst').val()))))))))) && (!data.child('hostReturned').exists() || newData.child('hostReturned').exists()) && (!data.child('guestReturned').exists() || newData.child('guestReturned').exists())",
             "id": {
               ".validate": "newData.isString() && newData.val().matches(/^[0-9a-f]{32}$/) && (!data.exists() || newData.val() == data.val())"
             },
@@ -319,6 +319,12 @@
               "$other": {
                 ".validate": false
               }
+            },
+            "hostReturned": {
+              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('host/uid').val() == auth.uid && root.child('versus-v1/history').child(auth.uid).child(newData.parent().child('id').val()).exists()))"
+            },
+            "guestReturned": {
+              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('guest/uid').val() == auth.uid && root.child('versus-v1/history').child(auth.uid).child(newData.parent().child('id').val()).exists()))"
             }
           }
         }
@@ -362,7 +368,7 @@
           ],
           "$match": {
             ".write": "auth != null && auth.uid == $uid && !data.exists() && newData.exists() && (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid || root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/uid').val() == auth.uid) && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/id').val() == $match && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/finishedAt').val() > 0 && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/finishedAt').val() >= now - 300000",
-            ".validate": "newData.hasChildren(['roomId', 'opponentName', 'levelName', 'winnerName', 'result', 'playedAt']) && newData.child('playedAt').val() == now && newData.child('levelName').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('level/name').val() && newData.child('opponentName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val()) && newData.child('result').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == auth.uid ? 'win' : 'loss')) && newData.child('winnerName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'Draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val()))",
+            ".validate": "newData.hasChildren(['roomId', 'opponentName', 'levelName', 'winnerName', 'result', 'playedAt']) && newData.child('playedAt').val() == now && newData.child('levelName').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('level/name').val() && newData.child('opponentName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val()) && newData.child('result').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == auth.uid ? 'win' : 'loss')) && newData.child('winnerName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'Draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val())) && (!newData.child('self').exists() || newData.hasChildren(['self','opponent','selfStats','opponentStats','levelId','rules']))",
             "roomId": {
               ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
             },
@@ -383,6 +389,222 @@
             },
             "$other": {
               ".validate": false
+            },
+            "self": {
+              ".validate": "newData.hasChildren([\"uid\", \"name\", \"accountId\", \"icon\", \"color1\", \"color2\", \"winRate\", \"recentGames\"])",
+              "$other": {
+                ".validate": false
+              },
+              "uid": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/uid').val())"
+              },
+              "name": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/name').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/name').val())"
+              },
+              "accountId": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/accountId').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/accountId').val())"
+              },
+              "icon": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/icon').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/icon').val())"
+              },
+              "color1": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/color1').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/color1').val())"
+              },
+              "color2": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/color2').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/color2').val())"
+              },
+              "winRate": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/winRate').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/winRate').val())"
+              },
+              "recentGames": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/recentGames').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/recentGames').val())"
+              }
+            },
+            "opponent": {
+              ".validate": "newData.hasChildren([\"uid\", \"name\", \"accountId\", \"icon\", \"color1\", \"color2\", \"winRate\", \"recentGames\"])",
+              "$other": {
+                ".validate": false
+              },
+              "uid": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/uid').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val())"
+              },
+              "name": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/name').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/name').val())"
+              },
+              "accountId": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/accountId').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/accountId').val())"
+              },
+              "icon": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/icon').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/icon').val())"
+              },
+              "color1": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/color1').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/color1').val())"
+              },
+              "color2": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/color2').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/color2').val())"
+              },
+              "winRate": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/winRate').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/winRate').val())"
+              },
+              "recentGames": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('guest/recentGames').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/recentGames').val())"
+              }
+            },
+            "selfStats": {
+              ".validate": "newData.hasChildren([\"attemptsUsed\", \"bestPercent\", \"currentPercent\", \"runNumber\", \"inAttempt\", \"cleared\", \"forfeited\", \"spectating\", \"paused\", \"pausedAt\", \"x\", \"y\", \"cameraX\", \"cameraY\", \"updatedAt\"])",
+              "$other": {
+                ".validate": false
+              },
+              "attemptsUsed": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/attemptsUsed').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/attemptsUsed').val())"
+              },
+              "bestPercent": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/bestPercent').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/bestPercent').val())"
+              },
+              "currentPercent": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/currentPercent').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/currentPercent').val())"
+              },
+              "runNumber": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/runNumber').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/runNumber').val())"
+              },
+              "inAttempt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/inAttempt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/inAttempt').val())"
+              },
+              "cleared": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cleared').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cleared').val())"
+              },
+              "forfeited": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/forfeited').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/forfeited').val())"
+              },
+              "spectating": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/spectating').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/spectating').val())"
+              },
+              "paused": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/paused').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/paused').val())"
+              },
+              "pausedAt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/pausedAt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/pausedAt').val())"
+              },
+              "x": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/x').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/x').val())"
+              },
+              "y": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/y').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/y').val())"
+              },
+              "cameraX": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cameraX').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cameraX').val())"
+              },
+              "cameraY": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cameraY').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cameraY').val())"
+              },
+              "updatedAt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/updatedAt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/updatedAt').val())"
+              }
+            },
+            "opponentStats": {
+              ".validate": "newData.hasChildren([\"attemptsUsed\", \"bestPercent\", \"currentPercent\", \"runNumber\", \"inAttempt\", \"cleared\", \"forfeited\", \"spectating\", \"paused\", \"pausedAt\", \"x\", \"y\", \"cameraX\", \"cameraY\", \"updatedAt\"])",
+              "$other": {
+                ".validate": false
+              },
+              "attemptsUsed": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/attemptsUsed').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/attemptsUsed').val())"
+              },
+              "bestPercent": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/bestPercent').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/bestPercent').val())"
+              },
+              "currentPercent": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/currentPercent').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/currentPercent').val())"
+              },
+              "runNumber": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/runNumber').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/runNumber').val())"
+              },
+              "inAttempt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/inAttempt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/inAttempt').val())"
+              },
+              "cleared": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cleared').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cleared').val())"
+              },
+              "forfeited": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/forfeited').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/forfeited').val())"
+              },
+              "spectating": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/spectating').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/spectating').val())"
+              },
+              "paused": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/paused').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/paused').val())"
+              },
+              "pausedAt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/pausedAt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/pausedAt').val())"
+              },
+              "x": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/x').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/x').val())"
+              },
+              "y": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/y').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/y').val())"
+              },
+              "cameraX": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cameraX').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cameraX').val())"
+              },
+              "cameraY": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/cameraY').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/cameraY').val())"
+              },
+              "updatedAt": {
+                ".validate": "newData.val() == (root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/guest/updatedAt').val() : root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('battle/host/updatedAt').val())"
+              }
+            },
+            "rules": {
+              ".validate": "newData.hasChildren([\"mode\", \"attempts\", \"targetPercent\", \"sequence\", \"practice\"])",
+              "$other": {
+                ".validate": false
+              },
+              "mode": {
+                ".validate": "newData.val() == root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('rules/mode').val()"
+              },
+              "attempts": {
+                ".validate": "newData.val() == root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('rules/attempts').val()"
+              },
+              "targetPercent": {
+                ".validate": "newData.val() == root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('rules/targetPercent').val()"
+              },
+              "sequence": {
+                ".validate": "newData.val() == root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('rules/sequence').val()"
+              },
+              "practice": {
+                ".validate": "newData.val() == root.child('versus-v1/rooms').child(newData.parent().parent().child('roomId').val()).child('rules/practice').val()"
+              }
+            },
+            "levelId": {
+              ".validate": "newData.isNumber() && newData.val() == root.child('versus-v1/rooms').child(newData.parent().child('roomId').val()).child('level/id').val()"
+            },
+            ".read": "auth != null && auth.uid == $uid"
+          }
+        }
+      },
+      "matchAttempts": {
+        "$match": {
+          "$uid": {
+            ".read": "auth != null && (auth.uid == $uid || root.child('versus-v1/history').child(auth.uid).child($match).child('opponent/uid').val() == $uid) && query.orderByChild == 'run' && query.limitToFirst != null && query.limitToFirst <= 10",
+            ".indexOn": [
+              "run"
+            ],
+            "$run": {
+              ".write": "auth != null && auth.uid == $uid && newData.exists() && ((root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/id').val() == $match && (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid || root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/uid').val() == auth.uid) && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('launch/releasedAt').val() > 0 && now >= root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('launch/releasedAt').val() + 3000 && newData.child('run').val() <= (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/host/runNumber').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/guest/runNumber').val()) && newData.child('percent').val() <= (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/host/bestPercent').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/guest/bestPercent').val())) || (root.child('versus-v1/history').child(auth.uid).child($match).child('roomId').val() == newData.child('roomId').val() && root.child('versus-v1/history').child(auth.uid).child($match).child('playedAt').val() >= now - 300000 && newData.child('run').val() <= root.child('versus-v1/history').child(auth.uid).child($match).child('selfStats/runNumber').val() && newData.child('percent').val() <= root.child('versus-v1/history').child(auth.uid).child($match).child('selfStats/bestPercent').val()))",
+              ".validate": "newData.hasChildren(['roomId','run','percent','endedAt']) && $run == 'r' + newData.child('run').val() && (!data.exists() || (newData.child('roomId').val() == data.child('roomId').val() && newData.child('run').val() == data.child('run').val() && newData.child('percent').val() == data.child('percent').val()))",
+              "roomId": {
+                ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+              },
+              "run": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 1000000"
+              },
+              "percent": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 100"
+              },
+              "endedAt": {
+                ".validate": "newData.isNumber() && newData.val() == now"
+              },
+              "$other": {
+                ".validate": false
+              }
             }
           }
         }

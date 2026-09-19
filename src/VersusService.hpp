@@ -26,14 +26,6 @@ struct LevelInfo {
     bool autoLevel = false;
     bool operator==(LevelInfo const&) const = default;
 };
-struct MatchRecord {
-    std::string id;
-    std::string opponentName;
-    std::string levelName;
-    std::string winnerName;
-    std::string result;
-    int64_t playedAt = 0;
-};
 struct LaunchInfo {
     std::string id;
     int64_t requestedAt = 0;
@@ -72,6 +64,16 @@ struct BattlePlayerState {
     double cameraY = 0;
     int64_t updatedAt = 0;
 };
+struct MatchRecord {
+    std::string id, opponentName, levelName, winnerName, result;
+    int64_t playedAt = 0, levelId = 0;
+    PlayerProfile self, opponent;
+    GameRules rules;
+    BattlePlayerState selfStats, opponentStats;
+    bool detailed = false;
+};
+struct AttemptRecord { int run = 0; int percent = 0; };
+using AttemptsCallback = std::function<void(std::vector<AttemptRecord>, std::vector<AttemptRecord>, std::string)>;
 struct BattleInfo {
     std::string id;
     std::string firstUid;
@@ -80,6 +82,7 @@ struct BattleInfo {
     int opponentRunAtFirst = 0;
     std::string winnerUid;
     bool draw = false;
+    bool hostReturned = false, guestReturned = false;
     int64_t finishedAt = 0;
     BattlePlayerState host;
     BattlePlayerState guest;
@@ -118,6 +121,9 @@ public:
     bool busy() const;
     void fetchRooms(RoomListCallback callback);
     void fetchHistory(HistoryCallback callback);
+    void fetchAttempts(MatchRecord match, int firstRun, AttemptsCallback callback);
+    void recordAttempt(int run, int percent);
+    void acknowledgeResult(Done callback);
     void createRoom(std::string name, std::string pin, Done callback);
     void joinRoom(RoomInfo room, std::string pin, Done callback);
     void leaveRoom(Done callback);

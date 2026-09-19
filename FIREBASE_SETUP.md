@@ -101,3 +101,15 @@ java -jar build-tools/firebase-database-emulator.jar --host 127.0.0.1 --port 900
 검사 항목에는 미인증 접근 차단, 비밀방 보호, 두 명 정원, 동시 입장, 준비와 로딩 권한, 게임 규칙, 이모티콘 속도 제한, 위치 전송 제한, 어템·퍼센트·시퀀스·프렉티스 판정, 전적 위조 차단과 목록 상한이 포함됩니다. 내려받은 에뮬레이터와 빌드 파일은 모드 리소스에 포함되지 않습니다.
 
 참고 문서: [파이어베이스 보안 규칙](https://firebase.google.com/docs/reference/security/database?hl=ko), [조건부 데이터 저장 요청](https://firebase.google.com/docs/database/rest/save-data?hl=ko#section-conditional-requests), [익명 인증](https://firebase.google.com/docs/auth/web/anonymous-auth?hl=ko).
+
+
+## 전적 상세와 경기 후 방 복귀
+
+최신 `firebase-rules.json` 전체를 데이터베이스 규칙에 붙여 넣고 게시해야 합니다.
+
+- 전적에 두 플레이어의 이름·아이콘·최고 퍼센트·경기 규칙·맵 번호를 저장합니다.
+- 각 어템의 최고 퍼센트는 `matchAttempts` 아래에 따로 저장합니다. 방 목록과 진행 상황을 받을 때 어템 기록 전체를 반복해서 내려받지 않습니다.
+- 상세 창에서는 어템 기록을 10개씩 조회합니다. 본인과 해당 경기의 상대만 기록을 조회할 수 있습니다.
+- 결과 연출이 끝나면 전적 저장 후 방으로 복귀합니다. 양쪽이 결과를 확인하면 준비 상태를 해제하고 같은 방에서 다음 경기를 준비합니다.
+- 업데이트 전 전적에는 상세 기록이 없으므로 기존 요약만 표시합니다.
+- 관전자 미니게임은 기기 안에서만 동작하며 경기 승패와 어템 수에 영향을 주지 않습니다. 상대 진행 상황만 받아오며 위치 전송은 사용하지 않습니다.

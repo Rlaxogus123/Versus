@@ -14,3 +14,7 @@ add_test(NAME membership COMMAND membership)
 add_executable(map_cache map_cache.cpp)
 target_include_directories(map_cache PRIVATE fakes ../src)
 add_test(NAME map_cache COMMAND map_cache)
+
+add_executable(runner runner.cpp)
+target_include_directories(runner PRIVATE ../src)
+add_test(NAME runner COMMAND runner)

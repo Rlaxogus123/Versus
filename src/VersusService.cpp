@@ -25,6 +25,11 @@ namespace versus {
 namespace {
 using Json = matjson::Value;
 using Clock = std::chrono::steady_clock;
+struct PendingAttempt {
+    std::string match, room, uid;
+    int run, percent;
+    Clock::time_point queued = Clock::now();
+};
 struct State {
     bool initialized = false;
     bool authenticating = false;
@@ -49,7 +54,10 @@ struct State {
     Clock::time_point expires;
     Clock::time_point lastContact = Clock::now();
     Clock::time_point nextHistoryAttempt = Clock::now();
-    bool historyWriting = false;
+    bool historyWriting = false, attemptWriting = false;
+    std::string historyError;
+    Clock::time_point nextAttemptWrite;
+    std::deque<PendingAttempt> attempts;
     std::unordered_set<std::string> recordedMatches;
     std::vector<Done> connectCallbacks;
     std::deque<std::function<void()>> pendingActions;
@@ -302,6 +310,7 @@ RoomInfo parseRoom(std::string id, Json const& value) {
         battle.opponentRunAtFirst = static_cast<int>(intAt(source, "opponentRunAtFirst"));
         battle.winnerUid = stringAt(source, "winnerUid");
         battle.draw = boolAt(source, "draw");
+        battle.hostReturned = boolAt(source, "hostReturned"); battle.guestReturned = boolAt(source, "guestReturned");
         battle.finishedAt = intAt(source, "finishedAt");
         battle.host = parseBattlePlayer(source["host"]);
         battle.guest = parseBattlePlayer(source["guest"]);
@@ -330,7 +339,7 @@ std::string networkError(web::WebResponse const& response) {
 }
 using Response = std::function<void(web::WebResponse)>;
 void request(std::string method, std::string path, Json body, Response callback,
-    std::string etag = {}, bool wantEtag = false, bool roomList = false, bool history = false) {
+    std::string etag = {}, bool wantEtag = false, bool roomList = false, bool history = false, std::string firstRun = {}) {
     auto request = web::WebRequest();
     request.timeout(std::chrono::seconds(8));
     request.header("Cache-Control", "no-cache");
@@ -343,6 +352,12 @@ void request(std::string method, std::string path, Json body, Response callback,
         request.param("startAt", nowMs() - firebase_config::PRESENCE_TIMEOUT_MS);
     }
     if (history) { request.param("orderBy", "\"playedAt\""); request.param("limitToLast", 10); }
+    if (!firstRun.empty()) {
+        request.param("orderBy", "\"run\"");
+        request.param("startAt", std::stoi(firstRun));
+        request.param("endAt", std::stoi(firstRun) + 9);
+        request.param("limitToFirst", 10);
+    }
     if (method != "GET") {
         request.header("Content-Type", "application/json");
         request.bodyString(body.dump());
@@ -612,6 +627,13 @@ void Service::fetchHistory(HistoryCallback callback) {
                 record.id = entry.getKey().value_or(""); record.opponentName = stringAt(entry, "opponentName");
                 record.levelName = stringAt(entry, "levelName"); record.winnerName = stringAt(entry, "winnerName");
                 record.result = stringAt(entry, "result"); record.playedAt = intAt(entry, "playedAt");
+                record.levelId = intAt(entry, "levelId");
+                record.detailed = entry["self"].isObject() && entry["opponent"].isObject();
+                if (record.detailed) {
+                    record.self = parseProfile(entry["self"]); record.opponent = parseProfile(entry["opponent"]);
+                    record.selfStats = parseBattlePlayer(entry["selfStats"]); record.opponentStats = parseBattlePlayer(entry["opponentStats"]);
+                    record.rules = parseRules(entry["rules"]);
+                }
                 records.push_back(std::move(record));
             }
             std::sort(records.begin(), records.end(), [](auto const& a, auto const& b) { return a.playedAt > b.playedAt; });
@@ -621,6 +643,46 @@ void Service::fetchHistory(HistoryCallback callback) {
             profile.winRate = records.empty() ? 0. : 100. * wins / records.size();
             callback(std::move(records), {});
         }, {}, false, false, true);
+    });
+}
+void Service::fetchAttempts(MatchRecord match, int firstRun, AttemptsCallback callback) {
+    struct Result { std::vector<AttemptRecord> own, other; std::string error; int pending = 2; AttemptsCallback done; };
+    auto result = std::make_shared<Result>(); result->done = std::move(callback);
+    for (bool own : {true, false}) {
+        auto uid = own ? match.self.uid : match.opponent.uid;
+        request("GET", "matchAttempts/" + match.id + "/" + uid, {}, [result, own](web::WebResponse response) {
+            auto parsed = response.json();
+            if (!response.ok() || !parsed) result->error = networkError(response);
+            else if (parsed.unwrap().isObject()) for (auto const& value : parsed.unwrap()) {
+                (own ? result->own : result->other).push_back({static_cast<int>(intAt(value, "run")), static_cast<int>(intAt(value, "percent"))});
+            }
+            if (--result->pending == 0) result->done(std::move(result->own), std::move(result->other), std::move(result->error));
+        }, {}, false, false, false, fmt::format("{}", std::clamp(firstRun, 1, 1000000)));
+    }
+}
+void Service::recordAttempt(int run, int percent) {
+    auto& s = state();
+    if (!s.room || !s.room->battle || run <= 0 || run > 1000000) return;
+    auto const& id = s.room->battle->id;
+    for (auto const& entry : s.attempts) if (entry.match == id && entry.run == run) return;
+    s.attempts.push_back({id, s.room->id, s.profile.uid, run, std::clamp(percent, 0, 100)});
+}
+void Service::acknowledgeResult(Done callback) {
+    auto& s = state();
+    if (!s.room || !s.room->battle) { callback(true, {}); return; }
+    if (busy() || s.writing || !s.recordedMatches.contains(s.room->battle->id)) {
+        callback(false, s.historyError.empty() ? "Saving match history..." : s.historyError); return;
+    }
+    auto epoch = s.epoch; auto match = s.room->battle->id; s.writing = true;
+    mutateRoom(s.room->id, epoch, [match](Json& body) -> std::string {
+        if (stringAt(std::as_const(body)["battle"], "id") != match) return "Match changed.";
+        if (intAt(std::as_const(body)["battle"], "finishedAt") <= 0) return "Match is still active.";
+        bool host = stringAt(std::as_const(body)["host"], "uid") == state().profile.uid;
+        body["battle"][host ? "hostReturned" : "guestReturned"] = true;
+        return {};
+    }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
+        if (state().epoch == epoch) { state().writing = false; state().pollTime = 2.f; }
+        callback(ok, std::move(error));
     });
 }
 void Service::createRoom(std::string name, std::string pin, Done callback) {
@@ -1022,6 +1084,21 @@ void Service::tick(float dt) {
         next();
         s.dispatchingAction = false;
     }
+    if (!s.attemptWriting && !s.attempts.empty() && connected() && Clock::now() >= s.nextAttemptWrite) {
+        auto entry = s.attempts.front();
+        if (Clock::now() - entry.queued > std::chrono::minutes(5)) s.attempts.pop_front();
+        else {
+            s.attemptWriting = true;
+            auto data = Json::object(); data["roomId"] = entry.room;
+            data["run"] = entry.run; data["percent"] = entry.percent; data["endedAt"] = timestamp();
+            request("PUT", "matchAttempts/" + entry.match + "/" + entry.uid + fmt::format("/r{}", entry.run), data,
+                [](web::WebResponse response) {
+                    auto& s = state(); s.attemptWriting = false;
+                    if (response.ok() && !s.attempts.empty()) s.attempts.pop_front();
+                    s.nextAttemptWrite = Clock::now() + (response.ok() ? std::chrono::milliseconds(0) : std::chrono::milliseconds(1500));
+                });
+        }
+    }
     if (!s.room) return;
     dt = std::clamp(dt, 0.f, 1.f); s.pollTime += dt; s.heartbeatTime += dt;
     if (Clock::now() - s.lastContact > std::chrono::seconds(60)) {
@@ -1046,14 +1123,35 @@ void Service::tick(float dt) {
             room.guest ? room.guest->name : "Player";
         history["result"] = match.draw ? "draw" : match.winnerUid == s.profile.uid ? "win" : "loss";
         history["playedAt"] = timestamp();
+        history["levelId"] = room.level.id;
+        history["self"] = profileJson(host ? room.host : *room.guest);
+        history["opponent"] = profileJson(host ? *room.guest : room.host);
+        history["rules"] = rulesJson(room.rules);
+        history["selfStats"] = battlePlayerJson(host ? match.host : match.guest);
+        history["opponentStats"] = battlePlayerJson(host ? match.guest : match.host);
         s.historyWriting = true;
         request("PUT", "history/" + s.profile.uid + "/" + match.id, history,
-            [id = match.id](web::WebResponse response) {
+            [id = match.id, roomId = room.id, uid = s.profile.uid](web::WebResponse response) {
                 auto& s = state();
                 s.historyWriting = false;
                 s.nextHistoryAttempt = Clock::now() + std::chrono::seconds(4);
-                if (response.ok()) s.recordedMatches.insert(id);
-            });
+                if (response.ok()) { s.recordedMatches.insert(id); s.historyError.clear(); }
+                else s.historyError = response.code() == 403 || response.code() == 401 ? "Update Firebase rules to save match details." : "Retrying match history save...";
+                if (!response.ok() && response.code() == 412) {
+                    // A lost success response must not strand the player on
+                    // the result screen. Verify our immutable archive receipt.
+                    s.historyWriting = true;
+                    request("GET", "history/" + uid + "/" + id, {}, [id, roomId](web::WebResponse check) {
+                        auto parsed = check.json(); auto& s = state(); s.historyWriting = false;
+                        if (check.ok() && parsed && stringAt(parsed.unwrap(), "roomId") == roomId && intAt(parsed.unwrap(), "playedAt") > 0)
+                            { s.recordedMatches.insert(id); s.historyError.clear(); }
+                    });
+                }
+            }, "null_etag");
+    }
+    if (!s.writing && !s.polling && !busy() && s.room->battle && s.room->battle->finishedAt > 0 &&
+        s.room->battle->hostReturned && s.room->battle->guestReturned) {
+        cancelLaunch(s.room->battle->id, [](bool, std::string) {});
     }
     if (!s.writing && !s.polling && s.room->battle && s.room->battle->finishedAt == 0 &&
         s.room->launch && s.room->launch->releasedAt > 0) {
