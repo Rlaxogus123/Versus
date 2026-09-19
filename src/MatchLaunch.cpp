@@ -490,7 +490,7 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
         PlayLayer::startMusic();
     }
     void pauseGame(bool unfocused) {
-        if (LaunchController::get().gated(this)) return;
+        if (LaunchController::get().gated(this) || versus::battle::blocksPause(this)) return;
         PlayLayer::pauseGame(unfocused);
         versus::battle::paused(this, m_isPaused);
     }
@@ -506,9 +506,12 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
         versus::battle::afterReset(this);
     }
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        bool alive = player && !player->m_isDead;
+        // GD uses nullptr to mean player one on several death paths.
+        auto* effective = player ? player : m_player1;
         PlayLayer::destroyPlayer(player, object);
-        if (alive && player && player->m_isDead) versus::battle::died(this);
+        if (effective && effective->m_isDead &&
+            (effective == m_player1 || (m_gameState.m_isDualMode && effective == m_player2)))
+            versus::battle::died(this);
     }
     void levelComplete() {
         PlayLayer::levelComplete();
@@ -517,6 +520,15 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
     void showEndLayer() {
         if (versus::battle::activeFor(this)) return;
         PlayLayer::showEndLayer();
+    }
+    void showRetryLayer() {
+        if (versus::battle::activeFor(this)) {
+            // Auto-retry may be disabled globally. Its modal must not capture
+            // input over the spectator runner or the match result.
+            if (!versus::battle::blocksGameplay(this)) resetLevel();
+            return;
+        }
+        PlayLayer::showRetryLayer();
     }
     void togglePracticeMode(bool practice) {
         if (!versus::battle::allowPracticeToggle(this, practice)) return;

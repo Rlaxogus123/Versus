@@ -560,6 +560,9 @@ try {
     $room.hostSeen = Timestamp
     Assert-Status 'exhausted host enters spectator state' (Put-Room battlecase host $room)
     $room = Get-Room battlecase
+    Set-Field $room.battle hostReturned $true
+    Assert-Status 'cannot return acknowledgement while opponent still playing' (Put-Room battlecase host $room) @(401,403)
+    $room = Get-Room battlecase
     $room.battle.guest.x = 120
     $room.battle.guest.y = 45
     $room.battle.guest.cameraX = 90
@@ -776,7 +779,7 @@ try {
     $room = Get-Room practicecase
     $match = $room.battle.id
     Set-Field $room.battle hostReturned $true
-    Assert-Status 'cannot acknowledge before history saved' (Put-Room practicecase host $room) @(401,403)
+    Assert-Status 'finished player may acknowledge before history saved' (Put-Room practicecase host $room)
     $room = Get-Room practicecase
     foreach ($uid in @('host','guest')) {
         $isHost = $uid -eq 'host'
@@ -835,6 +838,31 @@ try {
     Assert-True 'both players and map retained after result' ($room.host.uid -eq 'host' -and $room.guest.uid -eq 'guest' -and $room.level.id -gt 0 -and !$room.started)
     Assert-Status 'history still authorizes opponent attempts after reset' (Send-Request GET "versus-v1/matchAttempts/$match/host" -Uid guest -Query $query)
     Assert-Status 'delayed own attempt remains writable after reset' (Send-Request PUT "versus-v1/matchAttempts/$match/guest/r1" $attempt -Uid guest)
+
+    # History denial/unavailability cannot hold a finished match hostage.
+    $fallback = Get-Room battlecase
+    $fallback.launch.id = [Guid]::NewGuid().ToString('N')
+    $fallback.battle.id = $fallback.launch.id
+    Remove-Field $fallback.battle hostReturned
+    Remove-Field $fallback.battle guestReturned
+    Assert-Status 'seed finished match with no archival receipts' (Send-Request PUT 'versus-v1/rooms/returnfallback' $fallback -Admin)
+    $fallback = Get-Room returnfallback
+    Set-Field $fallback.battle hostReturned $true
+    Assert-Status 'host return independent of archival receipt' (Put-Room returnfallback host $fallback)
+    $fallback = Get-Room returnfallback
+    Set-Field $fallback.battle guestReturned $true
+    Assert-Status 'guest return independent of archival receipt' (Put-Room returnfallback guest $fallback)
+    $fallback = Get-Room returnfallback
+    $fallback.started=$false; $fallback.hostReady=$false; $fallback.guestReady=$false
+    Remove-Field $fallback launch
+    Assert-Status 'either returning player can reset finished match' (Put-Room returnfallback guest $fallback)
+    $fallback = Get-Room returnfallback
+    Assert-True 'archive failure still retains both players and selected map' (!$fallback.started -and $null -eq $fallback.battle -and $fallback.host.uid -eq 'host' -and $fallback.guest.uid -eq 'guest' -and $fallback.level.id -gt 0)
+    $fallback.hostReady = $true
+    Assert-Status 'host may ready next round immediately after return' (Put-Room returnfallback host $fallback)
+    $fallback = Get-Room returnfallback
+    $fallback.guestReady = $true
+    Assert-Status 'guest may ready next round immediately after return' (Put-Room returnfallback guest $fallback)
 
     $history = @{}
     for ($i = 1; $i -le 12; $i++) {

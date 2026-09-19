@@ -1,10 +1,13 @@
 #include "BattleSession.hpp"
+#include "BattleProgress.hpp"
+#include "BattleHUD.hpp"
 #include "MapCache.hpp"
 #include "SpectatorRunner.hpp"
 #include "VersusService.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
 #include <Geode/binding/PlayLayer.hpp>
+#include <Geode/binding/PauseLayer.hpp>
 #include <Geode/binding/PlayerObject.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/binding/UILayer.hpp>
@@ -39,6 +42,8 @@ public:
     bool quitDialog = false, warnedPause = false, leaving = false;
     bool finished = false, spectating = false, returning = false;
     int runBest = 0, lastRecordedRun = 0;
+    int reportFailures = 0;
+    std::string reportError;
     float returnRetry = 0.f;
     WeakRef<SpectatorRunner> runner;
     uint64_t generation = 0;
@@ -46,7 +51,8 @@ public:
     int64_t revealUntil = 0;
     Clock::time_point resultBegan;
     WeakRef<CCNode> hud;
-    WeakRef<CCLabelBMFont> leftStats, rightStats, status, returnStatus;
+    WeakRef<BattleHUD> playerHUD;
+    WeakRef<CCLabelBMFont> status, returnStatus;
 
     static Session& get() {
         static auto* session = [] {
@@ -68,30 +74,31 @@ public:
     }
     bool sequence() const { return rules.mode == 0 && rules.sequence && !rules.practice; }
     bool done() const {
-        return local.forfeited || local.cleared ||
-            (rules.mode == 0 && !rules.practice && local.attemptsUsed >= rules.attempts);
+        return terminal(local, rules);
     }
     bool blocked() const {
         return finished || leaving || spectating || Service::get().serverNow() < revealUntil;
     }
     void label(WeakRef<CCLabelBMFont> const& ref, std::string const& value) {
-        if (auto target = ref.lock(); target && value != target->getString()) target->setString(value.c_str());
+        if (auto target = ref.lock(); target && value != target->getString()) {
+            target->setString(value.c_str());
+            target->limitLabelWidth(CCDirector::sharedDirector()->getWinSize().width - 32.f, .65f, .2f);
+        }
     }
     void hudSetup(PlayLayer* layer) {
         auto window = CCDirector::sharedDirector()->getWinSize();
         auto* root = CCNode::create();
         root->setID("battle-hud"_spr);
-        auto* left = icon(hostProfile); left->setPosition({30.f, window.height - 31.f}); root->addChild(left);
-        auto* right = icon(guestProfile); right->setFlipX(true); right->setPosition({window.width - 30.f, window.height - 31.f}); root->addChild(right);
+        auto* cards = BattleHUD::create(hostProfile, guestProfile, rules);
+        if (cards) {
+            root->addChild(cards); playerHUD = cards;
+            cards->updatePlayers(host ? local : other, host ? other : local);
+        }
         auto make = [root](std::string const& text, CCPoint position, float scale) {
             auto* label = CCLabelBMFont::create(text.c_str(), "chatFont.fnt");
             label->setScale(scale); label->setPosition(position); root->addChild(label); return label;
         };
-        make(hostProfile.name, {72.f, window.height - 17.f}, .65f)->setAnchorPoint({0.f, .5f});
-        make(guestProfile.name, {window.width - 72.f, window.height - 17.f}, .65f)->setAnchorPoint({1.f, .5f});
-        auto* l = make("", {53.f, window.height - 37.f}, .7f); l->setAnchorPoint({0.f, .5f}); leftStats = l;
-        auto* r = make("", {window.width - 53.f, window.height - 37.f}, .7f); r->setAnchorPoint({1.f, .5f}); rightStats = r;
-        auto* info = make("", {window.width / 2.f, window.height - 62.f}, .8f);
+        auto* info = make("", {window.width / 2.f, window.height - 91.f}, .65f);
         info->setAlignment(kCCTextAlignmentCenter); status = info;
         if (sequence()) {
             auto* reveal = CCNode::create();
@@ -126,6 +133,7 @@ public:
         active = true; finished = false; leaving = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
+        reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
         roomID = room->id; battleID = room->battle->id; rules = room->rules;
         firstUid = room->battle->firstUid;
@@ -146,7 +154,11 @@ public:
     }
     int percent(PlayLayer* layer) const { return std::clamp(layer->getCurrentPercentInt(), 0, 100); }
     void sampleState(PlayLayer* layer) {
-        if (!owns(layer) || blocked() || local.paused || !local.inAttempt) return;
+        if (!owns(layer) || releasing || startingTurn || blocked() || local.paused || !local.inAttempt) return;
+        if ((layer->m_player1 && layer->m_player1->m_isDead) ||
+            (layer->m_gameState.m_isDualMode && layer->m_player2 && layer->m_player2->m_isDead)) {
+            death(layer); return;
+        }
         int current = percent(layer);
         if (current != local.currentPercent) { local.currentPercent = current; dirty = true; }
         local.bestPercent = std::max(local.bestPercent, current);
@@ -165,18 +177,17 @@ public:
         lastRecordedRun = local.runNumber;
     }
     void death(PlayLayer* layer) {
-        if (!owns(layer) || !local.inAttempt || blocked()) return;
-        local.currentPercent = percent(layer);
-        local.bestPercent = std::max(local.bestPercent, local.currentPercent);
+        if (!owns(layer) || releasing || startingTurn || !local.inAttempt || blocked()) return;
+        if (!finishAttempt(local, rules, percent(layer))) return;
         runBest = std::max(runBest, local.currentPercent); saveAttempt();
-        ++local.attemptsUsed; local.inAttempt = false; dirty = true; reportTimer = 0.f;
+        dirty = true; reportTimer = 0.f;
         if (done()) {
             spectating = true; local.spectating = true;
             FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         }
     }
     void clear(PlayLayer* layer) {
-        if (!owns(layer) || local.cleared) return;
+        if (!owns(layer) || local.cleared || finished || leaving || spectating) return;
         local.currentPercent = 100; local.bestPercent = 100; local.cleared = true;
         runBest = 100; saveAttempt();
         local.inAttempt = false; local.spectating = true; spectating = true; dirty = true; reportTimer = 0.f;
@@ -200,14 +211,21 @@ public:
         warnedPause = false; dirty = true; reportTimer = 0.f;
     }
     void report(bool force = false) {
-        if (!active || !sameBattle() || reporting || (!dirty && !force)) return;
+        if (!active || finished || !sameBattle() || reporting || (!dirty && !force)) return;
         bool position = false; // Local spectator runner needs only progress.
         reporting = true; dirty = false;
         auto epoch = generation;
-        Service::get().reportBattle(local, position, [this, epoch](bool success, std::string) {
+        Service::get().reportBattle(local, position, [this, epoch](bool success, std::string detail) {
             if (epoch != generation) return;
             reporting = false;
-            if (!success) dirty = true;
+            if (!success) {
+                dirty = true;
+                if (detail != "Room update in progress.") {
+                    reportError = std::move(detail);
+                    if (++reportFailures == 3) log::warn("Versus progress update failed: {}", reportError);
+                }
+            }
+            else { reportFailures = 0; reportError.clear(); }
         });
     }
     void forfeit() {
@@ -234,6 +252,19 @@ public:
             });
         return true;
     }
+    void dismissPause(PlayLayer* owner) {
+        // GD attaches PauseLayer to the scene, above every PlayLayer child.
+        // Remove it before presenting results and unpause the action manager.
+        auto* parent = owner->getParent();
+        auto* children = parent ? parent->getChildren() : nullptr;
+        if (children) {
+            for (int i = static_cast<int>(children->count()) - 1; i >= 0; --i) {
+                if (auto* pause = typeinfo_cast<PauseLayer*>(children->objectAtIndex(i)))
+                    pause->removeFromParentAndCleanup(true);
+            }
+        }
+        if (owner->m_isPaused) owner->resume();
+    }
     void endVisual(BattleInfo const& info) {
         if (finished || leaving) return;
         if (local.inAttempt) {
@@ -244,6 +275,7 @@ public:
         finished = true; resultBegan = Clock::now();
         if (auto game = runner.lock()) game->removeFromParent(); runner = nullptr;
         auto owner = play.lock(); if (!owner) return;
+        dismissPause(owner.data());
 #if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
         PlatformToolbox::showCursor();
 #endif
@@ -328,7 +360,7 @@ public:
         owner->addChild(root, 100010);
     }
     void exitAfterResult() {
-        if (!active || forcingQuit || returning || Service::get().busy()) return;
+        if (!active || forcingQuit || returning) return;
         auto quit = [this] {
             forcingQuit = true; mainMenu = leaving;
             auto owner = play.lock();
@@ -336,7 +368,7 @@ public:
             if (owner) owner->onQuit();
             active = false;
         };
-        if (leaving || !Service::get().room() || !Service::get().room()->battle) { quit(); return; }
+        if (leaving || !sameBattle()) { quit(); return; }
         returning = true; auto epoch = generation;
         Service::get().acknowledgeResult([this, epoch, quit](bool ok, std::string detail) {
             if (epoch != generation) return;
@@ -346,7 +378,10 @@ public:
         });
     }
     void updateSpectator(PlayLayer*, float) {
-        bool show = spectating && !finished && !leaving && Service::get().serverNow() >= revealUntil;
+        auto const& room = Service::get().room();
+        bool waitingTurn = sequence() && room && room->battle && room->battle->activeUid != uid && !done();
+        bool show = showRunner(rules, local, other, waitingTurn, finished || leaving,
+            Service::get().serverNow() < revealUntil);
         auto game = runner.lock();
         if (show && !game) {
             auto owner = play.lock();
@@ -363,14 +398,6 @@ public:
             else { game->removeFromParent(); runner = nullptr; }
         }
     }
-    std::string stats(BattlePlayerState const& state) const {
-        if (state.forfeited) return "Forfeit";
-        auto result = rules.mode == 0 ? rules.practice ? fmt::format("{} attempts", std::max(1, state.runNumber)) :
-            fmt::format("{} left", std::max(0, rules.attempts - state.attemptsUsed)) : fmt::format("{}%", state.bestPercent);
-        if (rules.mode == 0) result += fmt::format("  {}%", state.bestPercent);
-        if (state.paused) result += "  Paused";
-        return result;
-    }
     void update(float dt) override {
         if (!active) return;
         auto owner = play.lock(); if (!owner) { active = false; return; }
@@ -380,17 +407,24 @@ public:
         }
         if (!sameBattle()) {
             if (!finished && !leaving) {
-                BattleInfo result; result.winnerUid = uid;
-                result.host = host ? local : other; result.guest = host ? other : local;
-                endVisual(result);
+                // A canceled/deleted match is not evidence that we won. In
+                // particular, never acknowledge or reset a newer match here.
+                finished = true; resultBegan = Clock::now();
+                if (auto game = runner.lock()) game->removeFromParent(); runner = nullptr;
+                dismissPause(owner.data());
+                FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+                label(status, "Match ended. Returning to the room...");
             }
             return;
         }
-        auto const& snapshot = *Service::get().room()->battle;
+        auto const snapshot = *Service::get().room()->battle;
         other = host ? snapshot.guest : snapshot.host;
+        reconcileProgress(local, host ? snapshot.host : snapshot.guest, rules);
+        if (done()) spectating = true;
         if (snapshot.finishedAt && !finished && !leaving) endVisual(snapshot);
         auto now = Service::get().serverNow();
         if (!finished && !leaving) {
+            sampleState(owner.data());
             if (local.paused && local.pausedAt && now - local.pausedAt >= 30000) forfeit();
             else if (local.paused && local.pausedAt && now - local.pausedAt >= 20000 && !warnedPause) {
                 warnedPause = true;
@@ -415,21 +449,19 @@ public:
         updateSpectator(owner.data(), dt);
         reportTimer -= dt;
         if (reportTimer <= 0.f) {
-            bool stream = false;
-            reportTimer = stream ? 1.f / 7.f : .5f;
-            report(stream || local.paused);
+            reportTimer = .5f;
+            report(local.paused);
         }
         uiTimer -= dt;
         if (uiTimer <= 0.f) {
             uiTimer = .1f;
-            label(leftStats, stats(host ? local : other));
-            label(rightStats, stats(host ? other : local));
+            if (auto cards = playerHUD.lock()) cards->updatePlayers(host ? local : other, host ? other : local);
             if (revealUntil > now) {
                 auto const& name = firstUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
                 label(status, fmt::format("{} goes first\nStarting in {}", name, (revealUntil - now + 999) / 1000));
             }
-            else if (!finished && !leaving) label(status, local.paused ? "Paused - 30s maximum" :
-                other.paused ? "Opponent paused" : spectating ? "Spectating opponent" : "");
+            else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError : local.paused ? "Paused - 30s maximum" :
+                other.paused ? "Opponent paused" : spectating && terminal(other, rules) ? "Confirming match result..." : "");
         }
     }
 };
@@ -438,6 +470,7 @@ void begin(PlayLayer* layer) { Session::get().beginSession(layer); }
 bool activeFor(GJBaseGameLayer* layer) { return Session::get().owns(layer); }
 bool blocksGameplay(GJBaseGameLayer* layer) { auto& s = Session::get(); return s.owns(layer) && s.blocked(); }
 bool blocksInput(GJBaseGameLayer* layer) { return blocksGameplay(layer); }
+bool blocksPause(GJBaseGameLayer* layer) { auto& s = Session::get(); return s.owns(layer) && (s.finished || s.leaving); }
 void sample(PlayLayer* layer) { Session::get().sampleState(layer); }
 void died(PlayLayer* layer) { Session::get().death(layer); }
 void completed(PlayLayer* layer) { Session::get().clear(layer); }

@@ -18,3 +18,7 @@ add_test(NAME map_cache COMMAND map_cache)
 add_executable(runner runner.cpp)
 target_include_directories(runner PRIVATE ../src)
 add_test(NAME runner COMMAND runner)
+
+add_executable(battle_progress battle_progress.cpp)
+target_include_directories(battle_progress PRIVATE ../src)
+add_test(NAME battle_progress COMMAND battle_progress)

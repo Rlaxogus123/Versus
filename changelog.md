@@ -1,3 +1,12 @@
+# v0.4.5
+
+- Count native null-player deaths and deduplicate death/reset notifications.
+- Show the spectator runner only while the opponent is still playing; suppress native retry dialogs during battles.
+- Return to the room independently of history uploads and safely retry result acknowledgements.
+- Prevent duplicate room resets from clearing readiness for the next match.
+- Close the native pause menu when results arrive so it cannot cover the result animation.
+- Use bigFont player cards with blue gradients, mirrored layouts and heart life counters.
+
 # v0.4.4
 
 - Show the winner name and both players' best percentages in result animations.

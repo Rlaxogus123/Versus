@@ -321,10 +321,10 @@
               }
             },
             "hostReturned": {
-              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('host/uid').val() == auth.uid && root.child('versus-v1/history').child(auth.uid).child(newData.parent().child('id').val()).exists()))"
+              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('host/uid').val() == auth.uid))"
             },
             "guestReturned": {
-              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('guest/uid').val() == auth.uid && root.child('versus-v1/history').child(auth.uid).child(newData.parent().child('id').val()).exists()))"
+              ".validate": "newData.isBoolean() && ((data.exists() && newData.val() == data.val()) || (newData.val() == true && data.parent().child('finishedAt').val() > 0 && newData.parent().parent().child('guest/uid').val() == auth.uid))"
             }
           }
         }

@@ -1099,6 +1099,7 @@ class RoomLayer : public SceneLayer {
     std::string m_cacheError;
     std::string m_seenEmote;
     std::string m_signature;
+    std::string m_returnedBattle;
 
     void requestRender() {
         if (m_renderQueued || m_transitioning) return;
@@ -1201,7 +1202,8 @@ class RoomLayer : public SceneLayer {
             profileKey(room.host), room.guest ? profileKey(*room.guest) : "", room.level.id,
             room.level.name, room.level.difficulty, room.level.stars, room.level.demon,
             room.level.autoLevel, room.started, m_pending, Service::get().busy(), room.guestReady, launchKey,
-            room.hostReady, rulesText(room.rules), m_cached, m_downloading, m_cacheError);
+            room.hostReady, rulesText(room.rules), m_cached, m_downloading, m_cacheError) +
+            (room.battle ? fmt::format(":{}:{}:{}", room.battle->finishedAt, room.battle->hostReturned, room.battle->guestReturned) : "");
     }
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
         CCPoint origin, CCSize size, bool mine, bool host, bool ready) {
@@ -1324,7 +1326,7 @@ class RoomLayer : public SceneLayer {
             actions->addChild(gear);
             label(frame, "Game Rule", {centerX + 66.f, 64.f}, .28f, 75.f, kIce, false, "chatFont.fnt");
             enabled(gear, !m_pending && !Service::get().busy() && !room.started);
-            auto* start = button(actions, this, menu_selector(RoomLayer::onStart), room.started ? "Preparing" : "Start",
+            auto* start = button(actions, this, menu_selector(RoomLayer::onStart), room.battle && room.battle->finishedAt ? "Finishing" : room.started ? "Preparing" : "Start",
                 {width - cardWidth / 2.f - 12.f, 24.f}, .57f);
             enabled(choose, !m_pending && !Service::get().busy() && !room.started);
             enabled(start, !m_pending && !Service::get().busy() && !room.started && room.guest.has_value() &&
@@ -1484,7 +1486,14 @@ public:
             showLobby(std::move(notice));
             return;
         }
-        if (room && room->started && room->launch && !m_pending && !isMatchLaunchActive()) {
+        if (room && room->battle && room->battle->finishedAt > 0 && m_returnedBattle != room->battle->id) {
+            auto id = room->battle->id;
+            Service::get().acknowledgeResult([self = WeakRef<RoomLayer>(this), id](bool ok, std::string) {
+                if (auto owner = self.lock(); owner && ok) owner->m_returnedBattle = id;
+            });
+        }
+        if (room && room->started && room->launch && room->battle && room->battle->finishedAt == 0 &&
+            !m_pending && !isMatchLaunchActive()) {
             // Wait until our scene's fade has completed before replacing it.
             CCNode* scene = this;
             while (scene->getParent()) scene = scene->getParent();

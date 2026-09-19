@@ -56,6 +56,8 @@ struct State {
     Clock::time_point nextHistoryAttempt = Clock::now();
     bool historyWriting = false, attemptWriting = false;
     std::string historyError;
+    std::string returningMatch;
+    Clock::time_point returnRequestedAt, nextReturnAttempt;
     Clock::time_point nextAttemptWrite;
     std::deque<PendingAttempt> attempts;
     std::unordered_set<std::string> recordedMatches;
@@ -430,6 +432,9 @@ void recoverMembership(std::string id, uint64_t epoch, bool host, std::string er
 // Each seat mutation is a compare-and-swap of one room. Two simultaneous joins
 // cannot both succeed, and a heartbeat cannot resurrect a deleted room.
 using Mutator = std::function<std::string(Json&)>;
+// A peer may already have reset this match and readied the next one. Adopt
+// that read without issuing a write that would clear the new ready state.
+constexpr char const* ROOM_UNCHANGED = "\x1froom-unchanged";
 void mutateRoom(std::string id, uint64_t epoch, Mutator change, Done callback, int attempts = 3) {
     ++state().revision;
     request("GET", "rooms/" + id, {},
@@ -441,6 +446,9 @@ void mutateRoom(std::string id, uint64_t epoch, Mutator change, Done callback, i
             auto body = parsed.unwrap();
             if (!body.isObject()) { callback(false, "The host left the room."); return; }
             auto error = change(body);
+            if (error == ROOM_UNCHANGED) {
+                adoptRoom(id, body); callback(true, {}); return;
+            }
             if (!error.empty()) { callback(false, std::move(error)); return; }
             if (!body.isNull()) body["updatedAt"] = timestamp();
             request("PUT", "rooms/" + id, body,
@@ -670,20 +678,15 @@ void Service::recordAttempt(int run, int percent) {
 void Service::acknowledgeResult(Done callback) {
     auto& s = state();
     if (!s.room || !s.room->battle) { callback(true, {}); return; }
-    if (busy() || s.writing || !s.recordedMatches.contains(s.room->battle->id)) {
-        callback(false, s.historyError.empty() ? "Saving match history..." : s.historyError); return;
+    if (s.room->battle->finishedAt <= 0) { callback(false, "Match is still active."); return; }
+    if (s.returningMatch != s.room->battle->id) {
+        s.returningMatch = s.room->battle->id;
+        s.returnRequestedAt = Clock::now();
+        s.nextReturnAttempt = Clock::now();
     }
-    auto epoch = s.epoch; auto match = s.room->battle->id; s.writing = true;
-    mutateRoom(s.room->id, epoch, [match](Json& body) -> std::string {
-        if (stringAt(std::as_const(body)["battle"], "id") != match) return "Match changed.";
-        if (intAt(std::as_const(body)["battle"], "finishedAt") <= 0) return "Match is still active.";
-        bool host = stringAt(std::as_const(body)["host"], "uid") == state().profile.uid;
-        body["battle"][host ? "hostReturned" : "guestReturned"] = true;
-        return {};
-    }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
-        if (state().epoch == epoch) { state().writing = false; state().pollTime = 2.f; }
-        callback(ok, std::move(error));
-    });
+    // Returning to the room never waits on archival IO or CAS retries. The
+    // service survives scene changes and finishes the return handshake there.
+    callback(true, {});
 }
 void Service::createRoom(std::string name, std::string pin, Done callback) {
     if (busy() || state().room) { callback(false, "Leave your current room first."); return; }
@@ -999,7 +1002,10 @@ void Service::cancelLaunch(std::string launchId, Done callback) {
         auto const uid = state().profile.uid;
         if (stringAt(std::as_const(body)["host"], "uid") != uid && stringAt(std::as_const(body)["guest"], "uid") != uid)
             return "Your room connection expired.";
-        if (std::as_const(body)["launch"].isObject() && stringAt(std::as_const(body)["launch"], "id") != launchId) return "Match session changed.";
+        if (!boolAt(body, "started") && !std::as_const(body)["launch"].isObject() && !std::as_const(body)["battle"].isObject())
+            return ROOM_UNCHANGED;
+        if (stringAt(std::as_const(body)["launch"], "id") != launchId ||
+            stringAt(std::as_const(body)["battle"], "id") != launchId) return "Match session changed.";
         body["started"] = false;
         body["hostReady"] = false; body["guestReady"] = false;
         body["launch"] = nullptr; body["battle"] = nullptr;
@@ -1099,6 +1105,7 @@ void Service::tick(float dt) {
                 });
         }
     }
+    if (!s.room || !s.room->battle || s.room->battle->id != s.returningMatch) s.returningMatch.clear();
     if (!s.room) return;
     dt = std::clamp(dt, 0.f, 1.f); s.pollTime += dt; s.heartbeatTime += dt;
     if (Clock::now() - s.lastContact > std::chrono::seconds(60)) {
@@ -1108,7 +1115,7 @@ void Service::tick(float dt) {
         if (!s.authenticating && s.pollTime >= 2.f) { s.pollTime = 0; connect([](bool, std::string) {}); }
         return;
     }
-    if (s.room->battle && s.room->battle->finishedAt > 0 &&
+    if (s.room->guest && s.room->battle && s.room->battle->finishedAt > 0 &&
         !s.historyWriting && !s.recordedMatches.contains(s.room->battle->id) &&
         Clock::now() >= s.nextHistoryAttempt) {
         auto const match = *s.room->battle;
@@ -1148,6 +1155,34 @@ void Service::tick(float dt) {
                     });
                 }
             }, "null_etag");
+    }
+    if (!s.returningMatch.empty() && !s.writing && !s.polling && !busy() &&
+        Clock::now() >= s.nextReturnAttempt &&
+        (s.recordedMatches.contains(s.returningMatch) || Clock::now() - s.returnRequestedAt >= std::chrono::seconds(8))) {
+        auto const epoch = s.epoch;
+        auto const match = s.returningMatch;
+        s.writing = true;
+        mutateRoom(s.room->id, epoch, [match](Json& body) -> std::string {
+            auto& battle = body["battle"];
+            if (!boolAt(body, "started") && !battle.isObject()) return ROOM_UNCHANGED;
+            if (stringAt(battle, "id") != match) return "Match session changed.";
+            if (intAt(battle, "finishedAt") <= 0) return "Match is still active.";
+            auto const uid = state().profile.uid;
+            bool host = stringAt(std::as_const(body)["host"], "uid") == uid;
+            if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
+            auto const flag = host ? "hostReturned" : "guestReturned";
+            if (boolAt(battle, flag)) return ROOM_UNCHANGED;
+            battle[flag] = true;
+            body[host ? "hostSeen" : "guestSeen"] = timestamp();
+            return {};
+        }, [epoch, match](bool ok, std::string error) {
+            auto& s = state();
+            if (epoch != s.epoch) return;
+            s.writing = false;
+            s.nextReturnAttempt = Clock::now() + std::chrono::seconds(1);
+            if (ok && s.returningMatch == match) s.returningMatch.clear();
+            if (!ok) log::warn("Versus result return will retry: {}", error);
+        });
     }
     if (!s.writing && !s.polling && !busy() && s.room->battle && s.room->battle->finishedAt > 0 &&
         s.room->battle->hostReturned && s.room->battle->guestReturned) {

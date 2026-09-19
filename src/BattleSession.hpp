@@ -6,6 +6,7 @@ void begin(PlayLayer* layer);
 bool activeFor(GJBaseGameLayer* layer);
 bool blocksGameplay(GJBaseGameLayer* layer);
 bool blocksInput(GJBaseGameLayer* layer);
+bool blocksPause(GJBaseGameLayer* layer);
 void sample(PlayLayer* layer);
 void died(PlayLayer* layer);
 void completed(PlayLayer* layer);
