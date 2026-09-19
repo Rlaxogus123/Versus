@@ -24,6 +24,7 @@ struct LevelInfo {
     int stars = 0;
     bool demon = false;
     bool autoLevel = false;
+    bool operator==(LevelInfo const&) const = default;
 };
 struct MatchRecord {
     std::string id;
@@ -46,6 +47,7 @@ struct GameRules {
     int targetPercent = 40;
     bool sequence = false;
     bool practice = false;
+    bool operator==(GameRules const&) const = default;
 };
 struct EmoteInfo {
     std::string uid;

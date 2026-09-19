@@ -784,12 +784,11 @@ void Service::configureRules(GameRules rules, Done callback) {
 void Service::setReady(bool ready, Done callback) {
     if (state().writing || state().authenticating) {
         auto const expectedLevel = state().room ? state().room->level : LevelInfo{};
-        deferRoomAction([ready, expectedLevel](Done done) {
+        auto const expectedRules = state().room ? state().room->rules : GameRules{};
+        deferRoomAction([ready, expectedLevel, expectedRules](Done done) {
             auto const& current = state().room;
-            if (ready && (!current || current->level.id != expectedLevel.id ||
-                current->level.name != expectedLevel.name || current->level.stars != expectedLevel.stars ||
-                current->level.difficulty != expectedLevel.difficulty)) {
-                done(false, "The map changed. Check the selected map and ready again."); return;
+            if (ready && (!current || current->level != expectedLevel || current->rules != expectedRules)) {
+                done(false, "The map or rules changed. Check them and ready again."); return;
             }
             Service::get().setReady(ready, std::move(done));
         }, std::move(callback));
@@ -798,8 +797,9 @@ void Service::setReady(bool ready, Done callback) {
     if (!state().room || busy()) { callback(false, "Room is unavailable."); return; }
     auto const epoch = state().epoch;
     auto const expectedLevel = state().room->level;
+    auto const expectedRules = state().room->rules;
     state().writing = true;
-    mutateRoom(state().room->id, epoch, [ready, expectedLevel](Json& body) -> std::string {
+    mutateRoom(state().room->id, epoch, [ready, expectedLevel, expectedRules](Json& body) -> std::string {
         auto const uid = state().profile.uid;
         bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
         if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
@@ -808,8 +808,11 @@ void Service::setReady(bool ready, Done callback) {
             intAt(std::as_const(body)["level"], "id") != expectedLevel.id ||
             stringAt(std::as_const(body)["level"], "name") != expectedLevel.name ||
             intAt(std::as_const(body)["level"], "stars") != expectedLevel.stars ||
-            intAt(std::as_const(body)["level"], "difficulty") != expectedLevel.difficulty))
-            return "The map changed. Check the selected map and ready again.";
+            intAt(std::as_const(body)["level"], "difficulty") != expectedLevel.difficulty ||
+            boolAt(std::as_const(body)["level"], "demon") != expectedLevel.demon ||
+            boolAt(std::as_const(body)["level"], "autoLevel") != expectedLevel.autoLevel ||
+            parseRules(std::as_const(body)["rules"]) != expectedRules))
+            return "The map or rules changed. Check them and ready again.";
         body[host ? "hostReady" : "guestReady"] = ready;
         body[host ? "hostSeen" : "guestSeen"] = timestamp();
         return {};

@@ -1,3 +1,13 @@
+# v0.4.2
+
+- Replace inactive Ready with Choose Map or Download until its prerequisites are met.
+- Correct disabled-button opacity, refresh completed downloads, and show retry errors.
+- Defer room UI rebuilds until after touch callbacks and ignore stale download callbacks.
+- Recover the map download queue after expired native requests.
+- Reject readiness for maps or rules changed while the request was waiting.
+- Decorate room rows with blue and sky-blue beveled border blocks.
+- Keep the latest combined build at dist/tipp7.versus-AllPlatform.geode.
+
 # v0.4.1
 
 - Fix empty rooms being incorrectly reported as full and host readiness resetting on heartbeat.

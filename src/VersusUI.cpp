@@ -3,6 +3,7 @@
 #include "LevelSelector.hpp"
 #include "MatchLaunch.hpp"
 #include "MapCache.hpp"
+#include "RoomControls.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CreatorLayer.hpp>
@@ -84,15 +85,44 @@ CCMenuItemSpriteExtra* button(CCMenu* parent, CCObject* target, SEL_MenuHandler 
     return item;
 }
 
+void cascadeOpacity(CCNode* node) {
+    if (auto* rgba = typeinfo_cast<CCRGBAProtocol*>(node)) rgba->setCascadeOpacityEnabled(true);
+    for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) cascadeOpacity(child);
+}
+
 void enabled(CCMenuItemSpriteExtra* item, bool value) {
     item->setEnabled(value);
-    item->setCascadeOpacityEnabled(true);
+    cascadeOpacity(item);
     item->setOpacity(value ? 255 : 95);
 }
 
 void styleInput(TextInput* input) {
     input->getBGSprite()->setColor(ccc3(7, 31, 86));
     input->getBGSprite()->setOpacity(230);
+}
+
+// One draw node per row: small beveled blocks, with no extra touch handlers.
+void blueBlockBorder(CCNode* parent, CCSize size) {
+    auto* border = CCDrawNode::create();
+    auto block = [border](float x, float y, float w, float h, bool sky) {
+        CCPoint points[] = {{x, y}, {x + w, y}, {x + w, y + h}, {x, y + h}};
+        border->drawPolygon(points, 4, sky ? ccColor4F{.24f, .73f, 1.f, 1.f} : ccColor4F{.08f, .34f, .78f, 1.f},
+            .35f, {.035f, .13f, .34f, 1.f});
+        border->drawSegment({x + .5f, y + h - .5f}, {x + w - .5f, y + h - .5f}, .4f,
+            {.7f, .94f, 1.f, .8f});
+    };
+    int const count = std::max(2, static_cast<int>((size.width - 12.f) / 22.f));
+    float const step = (size.width - 12.f) / count;
+    for (int i = 0; i < count; ++i) {
+        block(6.f + i * step, size.height - 3.f, step - 1.f, 2.5f, i % 2 == 0);
+        block(6.f + i * step, .5f, step - 1.f, 2.5f, i % 2 != 0);
+    }
+    for (float x : {1.f, size.width - 5.f}) {
+        block(x, 1.f, 4.f, 6.f, true);
+        block(x, size.height - 7.f, 4.f, 6.f, true);
+        block(x + .5f, 8.f, 3.f, std::max(2.f, size.height - 16.f), false);
+    }
+    parent->addChild(border, 3);
 }
 
 SimplePlayer* player(CCNode* parent, PlayerProfile const& profile, CCPoint point, float scale) {
@@ -810,7 +840,7 @@ class LobbyLayer : public SceneLayer {
             auto const index = m_filtered[filteredIndex];
             auto const& room = m_rooms[index];
             bool const full = room.guest.has_value();
-            auto const accent = room.rules.mode == 1 ? ccc3(178, 159, 255) : ccc3(80, 221, 255);
+            auto const accent = room.rules.mode == 1 ? ccc3(163, 221, 255) : ccc3(80, 221, 255);
             auto const stateColor = room.started ? ccc3(255, 203, 117) : full ? kMuted : ccc3(117, 247, 184);
             auto* rowSprite = CCSprite::create();
             rowSprite->setContentSize({m_listWidth - 24.f, rowHeight});
@@ -822,11 +852,12 @@ class LobbyLayer : public SceneLayer {
             bg->setPosition(rowSprite->getContentSize() / 2.f);
             rowSprite->addChild(bg, -1);
             auto* gradient = CCLayerGradient::create(
-                room.rules.mode == 1 ? ccc4(74, 55, 132, 220) : ccc4(17, 100, 155, 220),
+                row % 2 ? ccc4(25, 109, 170, 220) : ccc4(17, 81, 151, 220),
                 ccc4(10, 31, 70, 170), {1.f, -.3f});
             gradient->setContentSize({rowWidth - 8.f, rowHeight - 6.f});
             gradient->setPosition({4.f, 3.f});
             rowSprite->addChild(gradient, -1);
+            blueBlockBorder(rowSprite, rowSprite->getContentSize());
             auto* trim = CCDrawNode::create();
             trim->drawSegment({5.f, 7.f}, {5.f, rowHeight - 7.f}, 1.4f,
                 {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .95f});
@@ -849,7 +880,7 @@ class LobbyLayer : public SceneLayer {
             float const badgeWidth = m_listWidth - 151.f;
             auto* modeBadge = NineSlice::create("square02b_001.png");
             modeBadge->setContentSize({badgeWidth, std::max(8.f, rowHeight * .25f)});
-            modeBadge->setColor(room.rules.mode == 1 ? ccc3(46, 34, 88) : ccc3(7, 56, 85));
+            modeBadge->setColor(room.rules.mode == 1 ? ccc3(23, 68, 119) : ccc3(7, 56, 85));
             modeBadge->setPosition({57.f + badgeWidth / 2.f, rowHeight * .15f});
             rowSprite->addChild(modeBadge);
             label(rowSprite, rulesText(room.rules), {61.f, rowHeight * .15f}, .30f,
@@ -995,10 +1026,24 @@ class RoomLayer : public SceneLayer {
     bool m_sendingEmote = false;
     bool m_downloading = false;
     bool m_cached = false;
+    bool m_renderQueued = false;
+    uint64_t m_downloadGeneration = 0;
     int64_t m_mapID = 0;
     std::string m_cacheError;
     std::string m_seenEmote;
     std::string m_signature;
+
+    void requestRender() {
+        if (m_renderQueued || m_transitioning) return;
+        m_renderQueued = true;
+        // Never destroy a CCMenu or its selected item inside its touch callback.
+        Loader::get()->queueInMainThread([self = WeakRef<RoomLayer>(this)] {
+            if (auto owner = self.lock()) {
+                owner->m_renderQueued = false;
+                if (!owner->m_transitioning) owner->render();
+            }
+        });
+    }
 
     void animateReady() {
         if (!m_readyGlow || !m_readySprite) return;
@@ -1020,14 +1065,15 @@ class RoomLayer : public SceneLayer {
         m_downloading = true;
         m_cacheError.clear();
         auto const levelID = room->level.id;
-        ensureMapCached(levelID, [self = WeakRef<RoomLayer>(this), levelID](bool success, std::string detail) {
+        auto const generation = ++m_downloadGeneration;
+        ensureMapCached(levelID, [self = WeakRef<RoomLayer>(this), levelID, generation](bool success, std::string detail) {
             auto owner = self.lock();
-            if (!owner || owner->m_mapID != levelID) return;
+            if (!owner || owner->m_mapID != levelID || owner->m_downloadGeneration != generation) return;
             owner->m_downloading = false;
             owner->m_cached = success && mapCached(levelID);
             if (owner->m_cached) preloadBattleAssets();
             owner->m_cacheError = owner->m_cached ? std::string() : std::move(detail);
-            owner->render();
+            owner->requestRender();
         });
     }
 
@@ -1117,6 +1163,7 @@ class RoomLayer : public SceneLayer {
         if (!current) return;
         auto const room = *current;
         if (m_mapID != room.level.id) {
+            ++m_downloadGeneration;
             m_mapID = room.level.id;
             m_cached = room.level.id > 0 && mapCached(room.level.id);
             m_downloading = false;
@@ -1176,12 +1223,21 @@ class RoomLayer : public SceneLayer {
                 centerWidth, kMuted, false, "chatFont.fnt");
         }
         auto* actions = menu(frame);
+        auto const control = readyControl(room.started, m_pending, host, room.level.id > 0,
+            m_cached, m_downloading, myReady);
         auto* ready = button(actions, this, menu_selector(RoomLayer::onReady),
-            room.started ? "Preparing" : myReady ? "Unready" : "Ready",
+            control.caption,
             {12.f + cardWidth / 2.f, 24.f}, .55f,
             myReady ? "GJ_button_04.png" : "GJ_button_01.png");
-        enabled(ready, !m_pending && !Service::get().busy() && !room.started && room.level.id > 0 && (myReady || m_cached));
-        if (!myReady && ready->isEnabled()) {
+        ready->setID("ready-button"_spr);
+        if (ready->getContentSize().width > cardWidth - 6.f) {
+            auto* sprite = static_cast<ButtonSprite*>(ready->getNormalImage());
+            sprite->setScale(sprite->getScale() * (cardWidth - 6.f) / ready->getContentSize().width);
+            ready->updateSprite();
+        }
+        // Download/retry uses this same button; do not leave a dead Ready button.
+        enabled(ready, control.enabled());
+        if (!myReady && m_cached && ready->isEnabled()) {
             // Tint the actual background; menu-item color does not propagate
             // through every ButtonSprite child. Keep phase across room redraws.
             m_readySprite = static_cast<ButtonSprite*>(ready->getNormalImage());
@@ -1236,12 +1292,16 @@ class RoomLayer : public SceneLayer {
             actions->addChild(item);
             enabled(item, room.guest.has_value() && !room.started);
         }
-        m_status->setString(m_pending ? "Updating room..." : room.started ? "Preparing both players..." :
-            m_downloading ? "Downloading the selected map and audio..." : !m_cacheError.empty() ? "Download failed. Press Download to retry." :
+        std::string const status = m_pending ? "Updating room..." : room.started ? "Preparing both players..." :
+            m_downloading ? "Downloading the selected map and audio..." : !m_cacheError.empty() ? m_cacheError + " Tap Download to retry." :
             !room.level.id ? "Host: choose a map and game rules" :
             !myReady ? "Press Ready after your map finishes downloading" :
             !opponent ? "Ready - waiting for an opponent" : !opponentReady ? "Ready - waiting for the other player" :
-            host ? "Both players ready - press Start" : "Both players ready - waiting for the host");
+            host ? "Both players ready - press Start" : "Both players ready - waiting for the host";
+        m_status->setString(status.c_str());
+        m_status->setScale(.3f);
+        if (m_status->getContentSize().width * .3f > m_window.width - 40.f)
+            m_status->setScale((m_window.width - 40.f) / m_status->getContentSize().width);
     }
     void onRules(CCObject*) {
         auto const& room = Service::get().room();
@@ -1252,7 +1312,7 @@ class RoomLayer : public SceneLayer {
         if (!m_downloading) {
             m_cacheError.clear();
             beginDownload();
-            render();
+            requestRender();
         }
     }
     void onEmote(CCObject* sender) {
@@ -1285,31 +1345,38 @@ class RoomLayer : public SceneLayer {
         if (m_pending || m_transitioning || Service::get().busy() || !room || !Service::get().isHost() || room->started ||
             !room->guest || !room->hostReady || !room->guestReady || !room->level.id) return;
         m_pending = true;
-        render();
+        requestRender();
         Service::get().startMatch([self = WeakRef<RoomLayer>(this)](bool success, std::string detail) {
             auto owner = self.lock();
             if (!owner) return;
             owner->m_pending = false;
-            owner->render();
+            owner->requestRender();
             if (!success) error(detail);
         });
     }
     void onReady(CCObject*) {
         auto const& room = Service::get().room();
-        if (m_pending || m_transitioning || Service::get().busy() || !room ||
-            room->started || !room->level.id || (!Service::get().isHost() && !room->guest)) return;
-        bool const ready = !(Service::get().isHost() ? room->hostReady : room->guestReady);
-        if (ready && !m_cached) {
+        if (m_pending || m_transitioning || !room || room->started ||
+            (!Service::get().isHost() && !room->guest)) return;
+        m_cached = mapCached(room->level.id);
+        bool const host = Service::get().isHost();
+        auto const control = readyControl(room->started, m_pending, host, room->level.id > 0,
+            m_cached, m_downloading, host ? room->hostReady : room->guestReady);
+        if (control.action == ReadyAction::None) return;
+        if (control.action == ReadyAction::ChooseMap) { onChoose(nullptr); return; }
+        if (control.action == ReadyAction::Download) {
             beginDownload();
+            requestRender();
             return;
         }
+        bool const ready = control.action == ReadyAction::Ready;
         m_pending = true;
-        render();
+        requestRender();
         Service::get().setReady(ready, [self = WeakRef<RoomLayer>(this)](bool success, std::string detail) {
             auto owner = self.lock();
             if (!owner) return;
             owner->m_pending = false;
-            owner->render();
+            owner->requestRender();
             if (!success) error(detail);
         });
     }
@@ -1328,7 +1395,7 @@ class RoomLayer : public SceneLayer {
                 return;
             }
             enabled(owner->m_back, true);
-            owner->render();
+            owner->requestRender();
             error(detail);
         });
     }
@@ -1361,8 +1428,15 @@ public:
             }
         }
         if (room) {
+            // Native downloads may finish outside our cache callback, or files
+            // may be removed. Refresh availability before comparing the UI state.
+            bool const cached = room->level.id > 0 && mapCached(room->level.id);
+            if (cached != m_cached) {
+                m_cached = cached;
+                if (cached) { m_downloading = false; m_cacheError.clear(); preloadBattleAssets(); }
+            }
             showRoomEmote(*room);
-            if (signature(*room) != m_signature) render();
+            if (signature(*room) != m_signature) requestRender();
         }
     }
 };

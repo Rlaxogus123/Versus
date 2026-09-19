@@ -95,7 +95,13 @@ public:
         if (manager->m_levelDownloadDelegate == this) manager->m_levelDownloadDelegate = nullptr;
     }
     void levelDownloadFinished(GJGameLevel* value) override {
-        if (!pending || !value || value->m_levelID.value() != pendingID) return;
+        if (!pending) return;
+        if (!value) {
+            releaseDelegate();
+            finish(false, "The selected map returned no data.");
+            return;
+        }
+        if (value->m_levelID.value() != pendingID) return;
         bool valid = current && current->id == pendingID && generation == requestGeneration;
         releaseDelegate();
         if (!value->m_levelString.empty()) levels[value->m_levelID.value()] = value;
@@ -117,6 +123,12 @@ public:
         timer -= dt;
         if (timer > 0.f) return;
         timer = .2f;
+        // A native request can end without delivering our delegate (another
+        // scene may have replaced it). Do not let this block all later retries.
+        if (pending && (!current || generation != requestGeneration)) {
+            auto* manager = GameLevelManager::sharedState();
+            if (!manager->isDLActive(manager->getLevelDownloadKey(pendingID, false, 0))) releaseDelegate();
+        }
         if (!current) {
             if (queue.empty()) return;
             current = std::move(queue.front()); queue.pop_front();

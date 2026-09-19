@@ -1,4 +1,6 @@
 #include "RoomMembership.hpp"
+#include "RoomControls.hpp"
+#include "VersusService.hpp"
 #include <iostream>
 #include <stdexcept>
 
@@ -31,4 +33,22 @@ int main() {
     room["started"] = true;
     check(versus::roomJoinError(room, "third", 100100, 45000) == "The match has already started.", "started match rejects joins");
     check(versus::roomJoinError(room, "guest", 100100, 45000).empty(), "recover active guest");
+    using versus::readyControl;
+    using versus::ReadyAction;
+    check(readyControl(false, false, true, false, false, false, false).action == ReadyAction::ChooseMap, "host without map can choose instead of dead Ready");
+    check(!readyControl(false, false, false, false, false, false, false).enabled(), "guest cannot choose missing map");
+    check(readyControl(false, false, false, true, false, false, false).action == ReadyAction::Download, "failed download remains retryable");
+    check(readyControl(false, false, false, true, false, true, false).action == ReadyAction::Download, "unfinished download cannot set Ready");
+    check(readyControl(false, false, false, true, true, true, false).action == ReadyAction::Ready, "completed cache overrides stale download UI state");
+    check(readyControl(false, false, true, true, false, false, true).action == ReadyAction::Unready, "can unready after cache loss");
+    check(!readyControl(false, true, true, true, true, false, false).enabled(), "pending readiness prevents duplicate click");
+    check(!readyControl(true, false, true, true, true, false, true).enabled(), "launch locks readiness");
+    versus::LevelInfo before, after;
+    after.autoLevel = true;
+    check(before != after, "auto-level changes invalidate queued readiness");
+    after = before; after.demon = true;
+    check(before != after, "demon changes invalidate queued readiness");
+    versus::GameRules previous, changed;
+    changed.practice = true;
+    check(previous != changed, "practice changes invalidate queued readiness");
 }
