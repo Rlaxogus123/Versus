@@ -1,0 +1,392 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "versus-v1": {
+      "rooms": {
+        ".read": "auth != null && query.orderByChild == 'updatedAt' && query.limitToLast != null && query.limitToLast <= 200",
+        ".indexOn": [
+          "updatedAt"
+        ],
+        "$room": {
+          ".read": "auth != null",
+          ".write": "auth != null && ((!data.exists() && newData.exists() && newData.child('host/uid').val() == auth.uid && root.child('versus-v1/roomSecrets').child($room).child('hostUid').val() == auth.uid && !newData.child('guest').exists() && newData.child('started').val() == false) || (data.exists() && data.child('host/uid').val() == auth.uid) || (data.exists() && newData.exists() && data.child('host/uid').val() != auth.uid && ((data.child('guest/uid').val() == auth.uid) || (!data.child('guest').exists() && newData.child('guest/uid').val() == auth.uid && data.child('started').val() == false && data.child('hostSeen').val() > now - 45000 && (data.child('privateRoom').val() == false || root.child('versus-v1/admissions').child($room).child(auth.uid).child('pin').val() == root.child('versus-v1/roomSecrets').child($room).child('pin').val())))))",
+          ".validate": "newData.hasChildren(['name', 'privateRoom', 'host', 'hostSeen', 'updatedAt', 'started', 'guestReady', 'hostReady', 'rules', 'hostEmoteAt', 'guestEmoteAt']) && newData.child('guest').exists() == newData.child('guestSeen').exists() && (!data.child('guest').exists() || newData.child('guest').exists() || data.child('guest/uid').val() == auth.uid || (data.child('host/uid').val() == auth.uid && data.child('guestSeen').val() <= now - 45000)) && (!data.child('level').exists() || newData.child('level').exists() || data.child('host/uid').val() == auth.uid) && (newData.child('guestReady').val() == false || (newData.child('guest').exists() && newData.child('level/id').val() > 0)) && (newData.child('started').val() == true ? (newData.child('launch').exists() && newData.child('battle').exists() && newData.child('guestReady').val() == true && newData.child('hostReady').val() == true) : (!newData.child('launch').exists() && !newData.child('battle').exists())) && (data.child('started').val() != true || newData.child('started').val() == true || (newData.child('guestReady').val() == false && newData.child('hostReady').val() == false)) && (newData.child('hostReady').val() == false || newData.child('level/id').val() > 0)",
+          "name": {
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 48 && newData.val().matches(/.*[^ ].*/) && (!data.exists() || newData.val() == data.val())"
+          },
+          "privateRoom": {
+            ".validate": "newData.isBoolean() && (data.exists() ? newData.val() == data.val() : newData.val() == (root.child('versus-v1/roomSecrets').child($room).child('pin').val() != ''))"
+          },
+          "host": {
+            ".validate": "newData.hasChildren(['uid', 'name', 'accountId', 'icon', 'color1', 'color2', 'winRate', 'recentGames'])",
+            "uid": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128 && (data.exists() ? newData.val() == data.val() : newData.val() == auth.uid)"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 32 && (!data.exists() || newData.val() == data.val())"
+            },
+            "accountId": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 2147483647 && (!data.exists() || newData.val() == data.val())"
+            },
+            "icon": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 10000 && (!data.exists() || newData.val() == data.val())"
+            },
+            "color1": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 16777215 && (!data.exists() || newData.val() == data.val())"
+            },
+            "color2": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 16777215 && (!data.exists() || newData.val() == data.val())"
+            },
+            "winRate": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && (!data.exists() || newData.val() == data.val())"
+            },
+            "recentGames": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 10 && (!data.exists() || newData.val() == data.val())"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "guest": {
+            ".validate": "newData.hasChildren(['uid', 'name', 'accountId', 'icon', 'color1', 'color2', 'winRate', 'recentGames']) && newData.child('uid').val() != newData.parent().child('host/uid').val()",
+            "uid": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128 && (data.exists() ? newData.val() == data.val() : newData.val() == auth.uid)"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 32 && (!data.exists() || newData.val() == data.val())"
+            },
+            "accountId": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 2147483647 && (!data.exists() || newData.val() == data.val())"
+            },
+            "icon": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 10000 && (!data.exists() || newData.val() == data.val())"
+            },
+            "color1": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 16777215 && (!data.exists() || newData.val() == data.val())"
+            },
+            "color2": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 16777215 && (!data.exists() || newData.val() == data.val())"
+            },
+            "winRate": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100 && (!data.exists() || newData.val() == data.val())"
+            },
+            "recentGames": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 10 && (!data.exists() || newData.val() == data.val())"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "hostSeen": {
+            ".validate": "newData.isNumber() && ((data.exists() && newData.val() == data.val()) || (newData.parent().child('host/uid').val() == auth.uid && newData.val() == now))"
+          },
+          "guestSeen": {
+            ".validate": "newData.isNumber() && ((data.exists() && newData.val() == data.val()) || (newData.parent().child('guest/uid').val() == auth.uid && newData.val() == now))"
+          },
+          "updatedAt": {
+            ".validate": "newData.isNumber() && newData.val() == now"
+          },
+          "guestReady": {
+            ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (data.parent().child('guest/uid').val() == auth.uid && newData.parent().child('guest/uid').val() == auth.uid && data.parent().child('started').val() == false && newData.parent().child('started').val() == false && (newData.val() == false || newData.parent().child('level/id').val() > 0)) || (newData.val() == false && newData.parent().child('started').val() == false && (data.parent().child('started').val() == true || !newData.parent().child('guest').exists() || (data.parent().child('host/uid').val() == auth.uid && (newData.parent().child('level/id').val() != data.parent().child('level/id').val() || newData.parent().child('level/name').val() != data.parent().child('level/name').val() || newData.parent().child('level/difficulty').val() != data.parent().child('level/difficulty').val() || newData.parent().child('level/stars').val() != data.parent().child('level/stars').val() || newData.parent().child('level/demon').val() != data.parent().child('level/demon').val() || newData.parent().child('level/autoLevel').val() != data.parent().child('level/autoLevel').val() || newData.parent().child('rules/mode').val() != data.parent().child('rules/mode').val() || newData.parent().child('rules/attempts').val() != data.parent().child('rules/attempts').val() || newData.parent().child('rules/targetPercent').val() != data.parent().child('rules/targetPercent').val() || newData.parent().child('rules/sequence').val() != data.parent().child('rules/sequence').val() || newData.parent().child('rules/practice').val() != data.parent().child('rules/practice').val())))))"
+          },
+          "started": {
+            ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (newData.val() == true && data.val() == false && newData.parent().child('host/uid').val() == auth.uid && data.parent().child('guestReady').val() == true && data.parent().child('hostReady').val() == true && newData.parent().child('hostSeen').val() > now - 45000 && newData.parent().child('guestSeen').val() > now - 45000) || (newData.val() == false && (data.parent().child('host/uid').val() == auth.uid || data.parent().child('guest/uid').val() == auth.uid)))"
+          },
+          "launch": {
+            ".validate": "newData.hasChildren(['id', 'requestedAt', 'hostLoaded', 'guestLoaded', 'releasedAt']) && newData.parent().child('started').val() == true && (data.exists() || (data.parent().child('started').val() == false && newData.parent().child('host/uid').val() == auth.uid))",
+            "id": {
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9a-f]{32}$/) && (!data.exists() || newData.val() == data.val())"
+            },
+            "requestedAt": {
+              ".validate": "newData.isNumber() && (data.exists() ? newData.val() == data.val() : newData.val() == now)"
+            },
+            "hostLoaded": {
+              ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (data.val() == false && newData.val() == true && newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().child('releasedAt').val() == 0 && now <= data.parent().child('requestedAt').val() + 60000))"
+            },
+            "guestLoaded": {
+              ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (data.val() == false && newData.val() == true && newData.parent().parent().child('guest/uid').val() == auth.uid && data.parent().child('releasedAt').val() == 0 && now <= data.parent().child('requestedAt').val() + 60000))"
+            },
+            "releasedAt": {
+              ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || (data.val() == 0 && newData.val() == now && newData.parent().child('hostLoaded').val() == true && newData.parent().child('guestLoaded').val() == true && now <= data.parent().child('requestedAt').val() + 60000 && newData.parent().parent().child('hostSeen').val() > now - 45000 && newData.parent().parent().child('guestSeen').val() > now - 45000))"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "level": {
+            ".validate": "newData.hasChildren(['id', 'name', 'difficulty', 'stars', 'demon', 'autoLevel'])",
+            "id": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() > 0 && newData.val() <= 2147483647 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "name": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 64 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "difficulty": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= -1 && newData.val() <= 10 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "stars": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 10 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "demon": {
+              ".validate": "newData.isBoolean() && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "autoLevel": {
+              ".validate": "newData.isBoolean() && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('guestReady').val() == false && newData.parent().parent().child('hostReady').val() == false))"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "$other": {
+            ".validate": false
+          },
+          "hostReady": {
+            ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (data.parent().child('host/uid').val() == auth.uid && newData.parent().child('host/uid').val() == auth.uid && data.parent().child('started').val() == false && newData.parent().child('started').val() == false && (newData.val() == false || newData.parent().child('level/id').val() > 0)) || (newData.val() == false && newData.parent().child('started').val() == false && (data.parent().child('started').val() == true || !newData.parent().child('guest').exists() || (data.parent().child('host/uid').val() == auth.uid && (newData.parent().child('level/id').val() != data.parent().child('level/id').val() || newData.parent().child('level/name').val() != data.parent().child('level/name').val() || newData.parent().child('level/difficulty').val() != data.parent().child('level/difficulty').val() || newData.parent().child('level/stars').val() != data.parent().child('level/stars').val() || newData.parent().child('level/demon').val() != data.parent().child('level/demon').val() || newData.parent().child('level/autoLevel').val() != data.parent().child('level/autoLevel').val() || newData.parent().child('rules/mode').val() != data.parent().child('rules/mode').val() || newData.parent().child('rules/attempts').val() != data.parent().child('rules/attempts').val() || newData.parent().child('rules/targetPercent').val() != data.parent().child('rules/targetPercent').val() || newData.parent().child('rules/sequence').val() != data.parent().child('rules/sequence').val() || newData.parent().child('rules/practice').val() != data.parent().child('rules/practice').val())))))"
+          },
+          "rules": {
+            ".validate": "newData.hasChildren(['mode', 'attempts', 'targetPercent', 'sequence', 'practice']) && (newData.child('practice').val() == false || newData.child('sequence').val() == false) && (newData.child('mode').val() == 0 || newData.child('sequence').val() == false)",
+            "mode": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 1 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('hostReady').val() == false && newData.parent().parent().child('guestReady').val() == false))"
+            },
+            "attempts": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 99 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('hostReady').val() == false && newData.parent().parent().child('guestReady').val() == false))"
+            },
+            "targetPercent": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 1 && newData.val() <= 100 && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('hostReady').val() == false && newData.parent().parent().child('guestReady').val() == false))"
+            },
+            "sequence": {
+              ".validate": "newData.isBoolean() && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('hostReady').val() == false && newData.parent().parent().child('guestReady').val() == false))"
+            },
+            "practice": {
+              ".validate": "newData.isBoolean() && (newData.val() == data.val() || (newData.parent().parent().child('host/uid').val() == auth.uid && data.parent().parent().child('started').val() != true && newData.parent().parent().child('hostReady').val() == false && newData.parent().parent().child('guestReady').val() == false))"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "emote": {
+            ".validate": "newData.hasChildren(['uid', 'kind', 'at', 'nonce']) && ((newData.child('uid').val() == data.child('uid').val() && newData.child('kind').val() == data.child('kind').val() && newData.child('at').val() == data.child('at').val() && newData.child('nonce').val() == data.child('nonce').val()) || (newData.child('uid').val() == auth.uid && newData.child('at').val() == now && (newData.parent().child('host/uid').val() == auth.uid ? (newData.parent().child('hostEmoteAt').val() == now && data.parent().child('hostEmoteAt').val() <= now - 1000) : (newData.parent().child('guestEmoteAt').val() == now && data.parent().child('guestEmoteAt').val() <= now - 1000))))",
+            "uid": {
+              ".validate": "newData.isString() && (newData.val() == newData.parent().parent().child('host/uid').val() || newData.val() == newData.parent().parent().child('guest/uid').val())"
+            },
+            "kind": {
+              ".validate": "newData.isString() && (newData.val() == 'like' || newData.val() == 'smile' || newData.val() == 'angry' || newData.val() == 'fire')"
+            },
+            "at": {
+              ".validate": "newData.isNumber() && newData.val() > 0"
+            },
+            "nonce": {
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9a-f]{32}$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
+          },
+          "hostEmoteAt": {
+            ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || (newData.parent().child('host/uid').val() == auth.uid && newData.val() == now && newData.val() >= data.val() + 1000 && newData.parent().child('emote/uid').val() == auth.uid && newData.parent().child('emote/at').val() == now))"
+          },
+          "guestEmoteAt": {
+            ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || (newData.parent().child('guest/uid').val() == auth.uid && newData.val() == now && newData.val() >= data.val() + 1000 && newData.parent().child('emote/uid').val() == auth.uid && newData.parent().child('emote/at').val() == now))"
+          },
+          "battle": {
+            ".validate": "newData.hasChildren(['id', 'firstUid', 'activeUid', 'firstReachedUid', 'opponentRunAtFirst', 'winnerUid', 'draw', 'finishedAt', 'host', 'guest']) && newData.child('id').val() == newData.parent().child('launch/id').val() && newData.parent().child('started').val() == true && (newData.child('finishedAt').val() == 0 ? (newData.child('winnerUid').val() == '' && newData.child('draw').val() == false) : ((newData.child('draw').val() == true && newData.child('winnerUid').val() == '' && ((newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() == newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() == newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && ((newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('guest/runNumber').val() == newData.child('opponentRunAtFirst').val()) || (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('host/runNumber').val() == newData.child('opponentRunAtFirst').val()))))) || (newData.child('draw').val() == false && ((newData.child('winnerUid').val() == newData.parent().child('host/uid').val() && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('host/cleared').val() == true && newData.child('guest/cleared').val() == true && newData.child('host/attemptsUsed').val() < newData.child('guest/attemptsUsed').val()) : (((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('host/bestPercent').val() > newData.child('guest/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('host/uid').val() && newData.child('host/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('guest/inAttempt').val() == false || newData.child('guest/runNumber').val() != newData.child('opponentRunAtFirst').val()))))) || (newData.child('winnerUid').val() == newData.parent().child('guest/uid').val() && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || (newData.parent().child('rules/mode').val() == 0 && (newData.parent().child('rules/practice').val() == true ? (newData.child('guest/cleared').val() == true && newData.child('host/cleared').val() == true && newData.child('guest/attemptsUsed').val() < newData.child('host/attemptsUsed').val()) : (((newData.child('guest/forfeited').val() == true || (newData.child('guest/paused').val() == true && newData.child('guest/pausedAt').val() > 0 && now >= newData.child('guest/pausedAt').val() + 30000)) || newData.child('guest/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('guest/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && ((newData.child('host/forfeited').val() == true || (newData.child('host/paused').val() == true && newData.child('host/pausedAt').val() > 0 && now >= newData.child('host/pausedAt').val() + 30000)) || newData.child('host/cleared').val() == true || (newData.parent().child('rules/practice').val() == false && newData.child('host/attemptsUsed').val() >= newData.parent().child('rules/attempts').val())) && newData.child('guest/bestPercent').val() > newData.child('host/bestPercent').val()))) || (newData.parent().child('rules/mode').val() == 1 && (newData.child('firstReachedUid').val() == newData.parent().child('guest/uid').val() && newData.child('guest/bestPercent').val() >= newData.parent().child('rules/targetPercent').val() && (newData.child('host/inAttempt').val() == false || newData.child('host/runNumber').val() != newData.child('opponentRunAtFirst').val())))))))))",
+            "id": {
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9a-f]{32}$/) && (!data.exists() || newData.val() == data.val())"
+            },
+            "firstUid": {
+              ".validate": "newData.isString() && (data.exists() ? newData.val() == data.val() : (newData.val() == newData.parent().parent().child('host/uid').val() || newData.val() == newData.parent().parent().child('guest/uid').val()))"
+            },
+            "activeUid": {
+              ".validate": "newData.isString() && ((data.exists() && newData.val() == data.val()) || (!data.exists() && (newData.val() == newData.parent().child('firstUid').val() || ((newData.parent().parent().child('rules/sequence').val() == false || newData.parent().parent().child('rules/mode').val() != 0) && newData.val() == ''))) || (data.exists() && (newData.parent().parent().child('rules/sequence').val() == true && newData.parent().parent().child('rules/mode').val() == 0) && data.parent().child('finishedAt').val() == 0 && data.val() == data.parent().child('firstUid').val() && ((data.val() == newData.parent().parent().child('host/uid').val() && newData.val() == newData.parent().parent().child('guest/uid').val() && ((newData.parent().child('host/forfeited').val() == true || (newData.parent().child('host/paused').val() == true && newData.parent().child('host/pausedAt').val() > 0 && now >= newData.parent().child('host/pausedAt').val() + 30000)) || newData.parent().child('host/cleared').val() == true || (newData.parent().parent().child('rules/practice').val() == false && newData.parent().child('host/attemptsUsed').val() >= newData.parent().parent().child('rules/attempts').val()))) || (data.val() == newData.parent().parent().child('guest/uid').val() && newData.val() == newData.parent().parent().child('host/uid').val() && ((newData.parent().child('guest/forfeited').val() == true || (newData.parent().child('guest/paused').val() == true && newData.parent().child('guest/pausedAt').val() > 0 && now >= newData.parent().child('guest/pausedAt').val() + 30000)) || newData.parent().child('guest/cleared').val() == true || (newData.parent().parent().child('rules/practice').val() == false && newData.parent().child('guest/attemptsUsed').val() >= newData.parent().parent().child('rules/attempts').val()))))))"
+            },
+            "firstReachedUid": {
+              ".validate": "newData.isString() && ((!data.exists() && newData.val() == '') || newData.val() == data.val() || (data.val() == '' && newData.parent().parent().child('rules/mode').val() == 1 && ((newData.val() == newData.parent().parent().child('host/uid').val() && newData.parent().child('host/bestPercent').val() >= newData.parent().parent().child('rules/targetPercent').val()) || (newData.val() == newData.parent().parent().child('guest/uid').val() && newData.parent().child('guest/bestPercent').val() >= newData.parent().parent().child('rules/targetPercent').val()))))"
+            },
+            "opponentRunAtFirst": {
+              ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 1000000 && ((!data.exists() && newData.val() == 0) || (data.exists() && data.parent().child('firstReachedUid').val() != '' && newData.val() == data.val()) || (data.parent().child('firstReachedUid').val() == '' && (newData.parent().child('firstReachedUid').val() == '' ? newData.val() == 0 : (newData.parent().child('firstReachedUid').val() == newData.parent().parent().child('host/uid').val() ? (newData.val() == newData.parent().child('guest/runNumber').val() || (newData.parent().child('guest/inAttempt').val() == false && newData.val() == 0)) : (newData.val() == newData.parent().child('host/runNumber').val() || (newData.parent().child('host/inAttempt').val() == false && newData.val() == 0))))))"
+            },
+            "winnerUid": {
+              ".validate": "newData.isString() && ((!data.exists() && newData.val() == '') || newData.val() == data.val() || (data.parent().child('finishedAt').val() == 0 && newData.parent().child('finishedAt').val() == now))"
+            },
+            "draw": {
+              ".validate": "newData.isBoolean() && ((!data.exists() && newData.val() == false) || newData.val() == data.val() || (data.parent().child('finishedAt').val() == 0 && newData.parent().child('finishedAt').val() == now))"
+            },
+            "finishedAt": {
+              ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || (data.val() == 0 && newData.val() == now && newData.parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().child('launch/releasedAt').val() + 3000))"
+            },
+            "$other": {
+              ".validate": false
+            },
+            "host": {
+              ".validate": "newData.hasChildren(['attemptsUsed','bestPercent','currentPercent','runNumber','inAttempt','cleared','forfeited','spectating','paused','pausedAt','x','y','cameraX','cameraY','updatedAt']) && newData.child('currentPercent').val() <= newData.child('bestPercent').val() && (newData.child('cleared').val() == false || newData.child('bestPercent').val() == 100) && (newData.child('paused').val() == (newData.child('pausedAt').val() > 0)) && (!data.exists() || (newData.child('attemptsUsed').val() == data.child('attemptsUsed').val() && newData.child('bestPercent').val() == data.child('bestPercent').val() && newData.child('currentPercent').val() == data.child('currentPercent').val() && newData.child('runNumber').val() == data.child('runNumber').val() && newData.child('inAttempt').val() == data.child('inAttempt').val() && newData.child('cleared').val() == data.child('cleared').val() && newData.child('forfeited').val() == data.child('forfeited').val() && newData.child('spectating').val() == data.child('spectating').val() && newData.child('paused').val() == data.child('paused').val() && newData.child('pausedAt').val() == data.child('pausedAt').val() && newData.child('x').val() == data.child('x').val() && newData.child('y').val() == data.child('y').val() && newData.child('cameraX').val() == data.child('cameraX').val() && newData.child('cameraY').val() == data.child('cameraY').val() && newData.child('updatedAt').val() == data.child('updatedAt').val()) || newData.child('updatedAt').val() == now)",
+              "attemptsUsed": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= ((newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().parent().child('rules/practice').val() == false) ? newData.parent().parent().parent().child('rules/attempts').val() : 1000000) && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val())))) : newData.val() == 0)"
+              },
+              "bestPercent": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 100 && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val())))) : newData.val() == 0)"
+              },
+              "currentPercent": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 100 && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val())))) : newData.val() == 0)"
+              },
+              "runNumber": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 1000000 && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val())))) : newData.val() == (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('host/uid').val()) ? 1 : 0))"
+              },
+              "inAttempt": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val()) || newData.val() == false)))) : newData.val() == ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('host/uid').val()))"
+              },
+              "cleared": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('host/uid').val()) || newData.val() == false))) && (data.val() == false || newData.val() == true)) : newData.val() == false)"
+              },
+              "forfeited": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0)) && (data.val() == false || newData.val() == true)) : newData.val() == false)"
+              },
+              "spectating": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0))) : newData.val() == !((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('host/uid').val()))"
+              },
+              "paused": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0))) : newData.val() == false)"
+              },
+              "pausedAt": {
+                ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().child('paused').val() == false && newData.val() == 0) || (data.parent().child('paused').val() == false && newData.parent().child('paused').val() == true && newData.val() == now))))"
+              },
+              "x": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('guest/spectating').val() == true))"
+              },
+              "y": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('guest/spectating').val() == true))"
+              },
+              "cameraX": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('guest/spectating').val() == true))"
+              },
+              "cameraY": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('guest/spectating').val() == true))"
+              },
+              "updatedAt": {
+                ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('host/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.val() == now))"
+              },
+              "$other": {
+                ".validate": false
+              }
+            },
+            "guest": {
+              ".validate": "newData.hasChildren(['attemptsUsed','bestPercent','currentPercent','runNumber','inAttempt','cleared','forfeited','spectating','paused','pausedAt','x','y','cameraX','cameraY','updatedAt']) && newData.child('currentPercent').val() <= newData.child('bestPercent').val() && (newData.child('cleared').val() == false || newData.child('bestPercent').val() == 100) && (newData.child('paused').val() == (newData.child('pausedAt').val() > 0)) && (!data.exists() || (newData.child('attemptsUsed').val() == data.child('attemptsUsed').val() && newData.child('bestPercent').val() == data.child('bestPercent').val() && newData.child('currentPercent').val() == data.child('currentPercent').val() && newData.child('runNumber').val() == data.child('runNumber').val() && newData.child('inAttempt').val() == data.child('inAttempt').val() && newData.child('cleared').val() == data.child('cleared').val() && newData.child('forfeited').val() == data.child('forfeited').val() && newData.child('spectating').val() == data.child('spectating').val() && newData.child('paused').val() == data.child('paused').val() && newData.child('pausedAt').val() == data.child('pausedAt').val() && newData.child('x').val() == data.child('x').val() && newData.child('y').val() == data.child('y').val() && newData.child('cameraX').val() == data.child('cameraX').val() && newData.child('cameraY').val() == data.child('cameraY').val() && newData.child('updatedAt').val() == data.child('updatedAt').val()) || newData.child('updatedAt').val() == now)",
+              "attemptsUsed": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= ((newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().parent().child('rules/practice').val() == false) ? newData.parent().parent().parent().child('rules/attempts').val() : 1000000) && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val())))) : newData.val() == 0)"
+              },
+              "bestPercent": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 100 && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val())))) : newData.val() == 0)"
+              },
+              "currentPercent": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 100 && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val())))) : newData.val() == 0)"
+              },
+              "runNumber": {
+                ".validate": "newData.isNumber() && newData.val() % 1 == 0 && newData.val() >= 0 && newData.val() <= 1000000 && (data.exists() ? (newData.val() >= data.val() && (newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val())))) : newData.val() == (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('guest/uid').val()) ? 1 : 0))"
+              },
+              "inAttempt": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val()) || newData.val() == false)))) : newData.val() == ((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('guest/uid').val()))"
+              },
+              "cleared": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && (((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || data.parent().parent().child('activeUid').val() == newData.parent().parent().parent().child('guest/uid').val()) || newData.val() == false))) && (data.val() == false || newData.val() == true)) : newData.val() == false)"
+              },
+              "forfeited": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0)) && (data.val() == false || newData.val() == true)) : newData.val() == false)"
+              },
+              "spectating": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0))) : newData.val() == !((newData.parent().parent().parent().child('rules/sequence').val() == false || newData.parent().parent().parent().child('rules/mode').val() != 0) || newData.parent().parent().child('firstUid').val() == newData.parent().parent().parent().child('guest/uid').val()))"
+              },
+              "paused": {
+                ".validate": "newData.isBoolean() && (data.exists() ? ((newData.val() == data.val() || (newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0))) : newData.val() == false)"
+              },
+              "pausedAt": {
+                ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && ((newData.parent().child('paused').val() == false && newData.val() == 0) || (data.parent().child('paused').val() == false && newData.parent().child('paused').val() == true && newData.val() == now))))"
+              },
+              "x": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('host/spectating').val() == true))"
+              },
+              "y": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('host/spectating').val() == true))"
+              },
+              "cameraX": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('host/spectating').val() == true))"
+              },
+              "cameraY": {
+                ".validate": "newData.isNumber() && newData.val() >= -100000000 && newData.val() <= 100000000 && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.parent().parent().parent().child('rules/mode').val() == 0 && newData.parent().parent().child('host/spectating').val() == true))"
+              },
+              "updatedAt": {
+                ".validate": "newData.isNumber() && ((!data.exists() && newData.val() == 0) || newData.val() == data.val() || ((newData.parent().parent().parent().child('guest/uid').val() == auth.uid && newData.parent().parent().parent().child('launch/releasedAt').val() > 0 && now >= newData.parent().parent().parent().child('launch/releasedAt').val() + 3000 && data.parent().parent().child('finishedAt').val() == 0) && newData.val() == now))"
+              },
+              "$other": {
+                ".validate": false
+              }
+            }
+          }
+        }
+      },
+      "roomSecrets": {
+        "$room": {
+          ".read": "auth != null && (!data.exists() || data.child('hostUid').val() == auth.uid)",
+          ".write": "auth != null && ((!data.exists() && newData.child('hostUid').val() == auth.uid && !root.child('versus-v1/rooms').child($room).exists()) || (data.child('hostUid').val() == auth.uid && !newData.exists() && !root.child('versus-v1/rooms').child($room).exists()))",
+          ".validate": "newData.hasChildren(['hostUid', 'pin'])",
+          "hostUid": {
+            ".validate": "newData.isString() && newData.val() == auth.uid"
+          },
+          "pin": {
+            ".validate": "newData.isString() && (newData.val() == '' || newData.val().matches(/^[0-9]{4}$/))"
+          },
+          "$other": {
+            ".validate": false
+          }
+        }
+      },
+      "admissions": {
+        "$room": {
+          ".write": "auth != null && root.child('versus-v1/roomSecrets').child($room).child('hostUid').val() == auth.uid && !newData.exists()",
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid && root.child('versus-v1/rooms').child($room).child('privateRoom').val() == true && root.child('versus-v1/rooms').child($room).child('started').val() == false && root.child('versus-v1/rooms').child($room).child('hostSeen').val() > now - 45000 && newData.child('pin').val() == root.child('versus-v1/roomSecrets').child($room).child('pin').val()",
+            ".validate": "newData.hasChildren(['pin'])",
+            "pin": {
+              ".validate": "newData.isString() && newData.val().matches(/^[0-9]{4}$/)"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        }
+      },
+      "history": {
+        "$uid": {
+          ".read": "auth != null && auth.uid == $uid && query.orderByChild == 'playedAt' && query.limitToLast != null && query.limitToLast <= 10",
+          ".indexOn": [
+            "playedAt"
+          ],
+          "$match": {
+            ".write": "auth != null && auth.uid == $uid && !data.exists() && newData.exists() && (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid || root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/uid').val() == auth.uid) && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/id').val() == $match && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/finishedAt').val() > 0 && root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/finishedAt').val() >= now - 300000",
+            ".validate": "newData.hasChildren(['roomId', 'opponentName', 'levelName', 'winnerName', 'result', 'playedAt']) && newData.child('playedAt').val() == now && newData.child('levelName').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('level/name').val() && newData.child('opponentName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() == auth.uid ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val()) && newData.child('result').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == auth.uid ? 'win' : 'loss')) && newData.child('winnerName').val() == (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/draw').val() == true ? 'Draw' : (root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('battle/winnerUid').val() == root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/uid').val() ? root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('host/name').val() : root.child('versus-v1/rooms').child(newData.child('roomId').val()).child('guest/name').val()))",
+            "roomId": {
+              ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 128"
+            },
+            "opponentName": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "levelName": {
+              ".validate": "newData.isString() && newData.val().length <= 64"
+            },
+            "winnerName": {
+              ".validate": "newData.isString() && newData.val().length <= 32"
+            },
+            "result": {
+              ".validate": "newData.isString()"
+            },
+            "playedAt": {
+              ".validate": "newData.isNumber()"
+            },
+            "$other": {
+              ".validate": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

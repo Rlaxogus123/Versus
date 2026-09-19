@@ -1,0 +1,22 @@
+# Build output
+build/
+build-*/
+build-tools/
+geode-deps/
+*.geode
+firebase-debug.log
+database-debug.log
+firebase-export-*/
+
+# IDE and compiler caches
+.cache/
+.vs/
+.vscode/
+.idea/
+CMakeUserPresets.json
+*.obj
+*.pch
+*.pdb
+*.dll
+*.lib
+*.exp

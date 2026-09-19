@@ -1,0 +1,25 @@
+{
+  "geode": "5.7.1",
+  "gd": {
+    "win": "2.2081",
+    "android": "2.2081",
+    "mac": "2.2081",
+    "ios": "2.2081"
+  },
+  "id": "tipp7.versus",
+  "name": "Versus",
+  "version": "v0.4.0",
+  "developer": "Tipp7",
+  "description": "Create two-player Versus rooms with custom rules, ready up, and compete on the same level.",
+  "dependencies": {
+    "geode.node-ids": ">=v1.22.0"
+  },
+  "settings": {
+    "firebase-api-key": {
+      "type": "string",
+      "name": "Server API Key",
+      "description": "Firebase Web API key for the Versus server. Anonymous sign-in must be enabled in Firebase Authentication.",
+      "default": "AIzaSyD1yoiFEhGa0oFm6XCzJ9DgRXs92UIvzpY"
+    }
+  }
+}
