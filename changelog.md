@@ -1,3 +1,9 @@
+# v0.4.6
+
+- Show the winner's nickname and each player's best percentage throughout the result animation.
+- Keep results above native game overlays for seven seconds, then return both players to their room.
+- Treat pause timeouts as match losses that return to the room, rather than leaving the room.
+
 # v0.4.5
 
 - Count native null-player deaths and deduplicate death/reset notifications.

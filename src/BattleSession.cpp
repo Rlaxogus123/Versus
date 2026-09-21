@@ -19,6 +19,7 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
+constexpr auto RESULT_DISPLAY_TIME = std::chrono::seconds(7);
 ccColor3B color(int rgb) { return ccc3((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
 SimplePlayer* icon(PlayerProfile const& profile, float scale = .85f) {
     auto* manager = GameManager::sharedState();
@@ -39,8 +40,8 @@ public:
     BattlePlayerState other;
     bool host = false, active = false, releasing = false, startingTurn = false;
     bool reporting = false, dirty = false, forcingQuit = false, mainMenu = false;
-    bool quitDialog = false, warnedPause = false, leaving = false;
-    bool finished = false, spectating = false, returning = false;
+    bool quitDialog = false, warnedPause = false, leaving = false, timedOut = false;
+    bool finished = false, spectating = false, returning = false, resultVisible = false;
     int runBest = 0, lastRecordedRun = 0;
     int reportFailures = 0;
     std::string reportError;
@@ -130,9 +131,10 @@ public:
         auto const& room = Service::get().room();
         if (!room || !room->battle || !room->guest) return;
         ++generation;
-        active = true; finished = false; leaving = false; mainMenu = false; forcingQuit = false;
+        active = true; finished = false; leaving = false; timedOut = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
-        returning = false; returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
+        returning = false; resultVisible = false;
+        returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
         roomID = room->id; battleID = room->battle->id; rules = room->rules;
@@ -228,19 +230,24 @@ public:
             else { reportFailures = 0; reportError.clear(); }
         });
     }
-    void forfeit() {
+    void forfeit(bool leaveRoom) {
         if (!active || finished || leaving) return;
         saveAttempt();
         local.forfeited = true; local.inAttempt = false; local.paused = false;
         local.pausedAt = 0; local.spectating = true; spectating = true;
-        dirty = true; reportTimer = 0.f; leaving = true;
-        resultBegan = Clock::now();
+        dirty = true; reportTimer = 0.f;
+        leaving = leaveRoom;
+        timedOut = !leaveRoom;
+        if (leaveRoom) resultBegan = Clock::now();
         report(true);
-        label(status, "Leaving match...");
+        if (!leaveRoom) {
+            if (auto owner = play.lock()) dismissPause(owner.data());
+        }
+        label(status, leaveRoom ? "Leaving match..." : "Pause limit reached. Waiting for result...");
     }
     bool askQuit(PlayLayer* layer) {
         if (!owns(layer) || forcingQuit) return false;
-        if (finished) { exitAfterResult(); return true; }
+        if (finished) return true; // Keep the result on screen for its full duration.
         if (quitDialog || leaving) return true;
         quitDialog = true;
         auto epoch = generation;
@@ -248,7 +255,7 @@ public:
             [this, epoch](FLAlertLayer*, bool yes) {
                 if (epoch != generation || !active) return;
                 quitDialog = false;
-                if (yes) forfeit();
+                if (yes) forfeit(true);
             });
         return true;
     }
@@ -283,25 +290,29 @@ public:
         auto window = CCDirector::sharedDirector()->getWinSize();
         auto* root = CCNode::create(); root->setID("battle-result"_spr);
         auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 220)); root->addChild(shade);
-        std::string outcome = info.draw ? "DRAW" : info.winnerUid == uid ? "VICTORY" : "DEFEAT";
-        auto* title = CCLabelBMFont::create(outcome.c_str(), "bigFont.fnt");
-        title->setPosition({window.width / 2.f, window.height / 2.f + 94.f}); title->setScale(.75f); root->addChild(title);
-        auto resultLabel = [root, window](std::string text, float x, float y, float width, float scale) {
-            auto* value = CCLabelBMFont::create(text.c_str(), "chatFont.fnt");
+        auto const winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
+        auto* title = CCLabelBMFont::create(info.draw ? "DRAW" : (winnerName + " WINS!").c_str(), "bigFont.fnt");
+        title->setPosition({window.width / 2.f, window.height / 2.f + 94.f});
+        title->limitLabelWidth(window.width - 40.f, .75f, .3f); root->addChild(title);
+        auto resultLabel = [root, window](std::string text, float x, float y, float width, float scale,
+                                            char const* font = "chatFont.fnt") {
+            auto* value = CCLabelBMFont::create(text.c_str(), font);
             value->setScale(std::min(scale, width / std::max(1.f, value->getContentSize().width)));
             value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); root->addChild(value, 5); return value;
         };
-        auto winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
-        resultLabel(info.draw ? "Draw - equal result" : winnerName + " wins!", 0.f, 65.f, window.width-40.f, .95f);
+        resultLabel(info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost", 0.f, 65.f, window.width-40.f, .95f);
         resultLabel(hostProfile.name, -95.f, -56.f, 170.f, .85f);
         resultLabel(guestProfile.name, 95.f, -56.f, 170.f, .85f);
-        resultLabel(fmt::format("{}%", info.host.bestPercent), -95.f, -77.f, 170.f, 1.1f);
-        resultLabel(fmt::format("{}%", info.guest.bestPercent), 95.f, -77.f, 170.f, 1.1f);
+        resultLabel(fmt::format("{}%", info.host.bestPercent), -95.f, -79.f, 140.f, .5f, "bigFont.fnt")
+            ->setColor(info.draw || info.winnerUid == hostProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
+        resultLabel("VS", 0.f, -79.f, 35.f, .55f, "bigFont.fnt");
+        resultLabel(fmt::format("{}%", info.guest.bestPercent), 95.f, -79.f, 140.f, .5f, "bigFont.fnt")
+            ->setColor(info.draw || info.winnerUid == guestProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
         if (rules.practice && rules.mode == 0) {
             resultLabel(fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -96.f, 170.f, .6f);
             resultLabel(fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -96.f, 170.f, .6f);
         }
-        returnStatus = resultLabel("Returning to the room...", 0.f, -118.f, window.width-40.f, .65f);
+        returnStatus = resultLabel("Returning to the room in 7...", 0.f, -118.f, window.width-40.f, .65f);
         if (!info.draw) {
             auto const& loserState = info.winnerUid == hostProfile.uid ? info.guest : info.host;
             if (loserState.forfeited || loserState.pausedAt > 0) {
@@ -357,7 +368,11 @@ public:
                 CCRotateBy::create(.5f, direction * 360.f), CCMoveBy::create(.5f, {direction * 100.f, -70.f}),
                 CCScaleTo::create(.5f, 0.f), nullptr), nullptr));
         }
-        owner->addChild(root, 100010);
+        // PauseLayer and native end screens are siblings of PlayLayer. Put the
+        // result above them in the scene so it remains visible for both seats.
+        if (auto* scene = owner->getParent()) scene->addChild(root, 100010);
+        else owner->addChild(root, 100010);
+        resultVisible = true;
     }
     void exitAfterResult() {
         if (!active || forcingQuit || returning) return;
@@ -402,8 +417,16 @@ public:
         if (!active) return;
         auto owner = play.lock(); if (!owner) { active = false; return; }
         returnRetry -= dt;
-        if ((finished || leaving) && Clock::now() - resultBegan >= std::chrono::seconds(3)) {
-            if (returnRetry <= 0.f) exitAfterResult(); return;
+        if (finished || leaving) {
+            auto elapsed = Clock::now() - resultBegan;
+            if (finished && resultVisible && elapsed < RESULT_DISPLAY_TIME) {
+                auto left = std::chrono::ceil<std::chrono::seconds>(RESULT_DISPLAY_TIME - elapsed).count();
+                label(returnStatus, fmt::format("Returning to the room in {}...", left));
+                return;
+            }
+            if (elapsed >= (resultVisible ? RESULT_DISPLAY_TIME : std::chrono::seconds(3)) && returnRetry <= 0.f)
+                exitAfterResult();
+            return;
         }
         if (!sameBattle()) {
             if (!finished && !leaving) {
@@ -425,7 +448,7 @@ public:
         auto now = Service::get().serverNow();
         if (!finished && !leaving) {
             sampleState(owner.data());
-            if (local.paused && local.pausedAt && now - local.pausedAt >= 30000) forfeit();
+            if (local.paused && local.pausedAt && now - local.pausedAt >= 30000) forfeit(false);
             else if (local.paused && local.pausedAt && now - local.pausedAt >= 20000 && !warnedPause) {
                 warnedPause = true;
                 FLAlertLayer::create("Versus", "Paused for 20 seconds.\nResume before 30 seconds or forfeit.", "OK")->show();
@@ -460,7 +483,7 @@ public:
                 auto const& name = firstUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
                 label(status, fmt::format("{} goes first\nStarting in {}", name, (revealUntil - now + 999) / 1000));
             }
-            else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError : local.paused ? "Paused - 30s maximum" :
+            else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError : timedOut ? "Pause limit reached. Waiting for result..." : local.paused ? "Paused - 30s maximum" :
                 other.paused ? "Opponent paused" : spectating && terminal(other, rules) ? "Confirming match result..." : "");
         }
     }
