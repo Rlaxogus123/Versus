@@ -1,3 +1,8 @@
+# v0.4.8
+
+- Remove the sequence mode control and prevent new sequence matches while retaining legacy match compatibility.
+- Build the combined package for Windows, macOS, Android32, and Android64; exclude iOS.
+
 # v0.4.7
 
 - Put clean, edge-aligned player cards in the match HUD and use Life Calculator's heart shape.

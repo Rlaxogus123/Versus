@@ -749,50 +749,29 @@ try {
     Assert-Status 'same-run percent target produces draw' (Put-Room percentcase guest $room)
 
     Create-Room sequencecase
-    Assert-Status 'sequence guest joins' (Join-Room sequencecase guest)
+    Assert-Status 'legacy sequence room guest joins' (Join-Room sequencecase guest)
     $room = Get-Room sequencecase
-    Set-Field $room level @{ id = 34567; name = 'Sequence Map'; difficulty = 6; stars = 9; demon = $false; autoLevel = $false }
-    $room.rules.attempts = 1
     $room.rules.sequence = $true
-    Assert-Status 'host configures sequence rule' (Put-Room sequencecase host $room)
+    Assert-Status 'sequence mode cannot be enabled' (Put-Room sequencecase host $room) @(401, 403)
+    Assert-Status 'seed preexisting sequence room' (Send-Request PUT 'versus-v1/rooms/sequencecase' $room -Admin)
+    $room = Get-Room sequencecase
+    $room.rules.sequence = $false
+    Assert-Status 'guest cannot disable legacy sequence rule' (Put-Room sequencecase guest $room) @(401, 403)
+    $room = Get-Room sequencecase
+    $room.rules.sequence = $false
+    Assert-Status 'host can disable legacy sequence rule' (Put-Room sequencecase host $room)
+    $room = Get-Room sequencecase
+    Set-Field $room level @{ id = 34567; name = 'Normal Map'; difficulty = 6; stars = 9; demon = $false; autoLevel = $false }
+    Assert-Status 'normal match map selected' (Put-Room sequencecase host $room)
     Ready-Host sequencecase
     $room = Get-Room sequencecase
     $room.guestReady = $true
-    Assert-Status 'sequence guest marks Ready' (Put-Room sequencecase guest $room)
+    Assert-Status 'normal match guest marks Ready' (Put-Room sequencecase guest $room)
     $room = Get-Room sequencecase
     Set-Field $room launch (New-Launch)
     $room.started = $true
     Set-Field $room battle (New-Battle $room)
-    Assert-Status 'host creates sequence battle' (Put-Room sequencecase host $room)
-    $room = Get-Room sequencecase
-    $room.launch.hostLoaded = $true
-    $room.launch.guestLoaded = $true
-    $room.launch.releasedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 5000
-    Assert-Status 'seed released sequence battle' (Send-Request PUT 'versus-v1/rooms/sequencecase' $room -Admin)
-    $room = Get-Room sequencecase
-    $room.battle.guest.runNumber = 1
-    $room.battle.guest.inAttempt = $true
-    $room.battle.guest.spectating = $false
-    $room.battle.guest.updatedAt = Timestamp
-    $room.guestSeen = Timestamp
-    Assert-Status 'second sequence player cannot start early' (Put-Room sequencecase guest $room) @(401, 403)
-    $room = Get-Room sequencecase
-    $room.battle.host.attemptsUsed = 1
-    $room.battle.host.bestPercent = 55
-    $room.battle.host.currentPercent = 55
-    $room.battle.host.inAttempt = $false
-    $room.battle.host.spectating = $true
-    $room.battle.host.updatedAt = Timestamp
-    $room.battle.activeUid = 'guest'
-    $room.hostSeen = Timestamp
-    Assert-Status 'first sequence turn hands control to opponent' (Put-Room sequencecase host $room)
-    $room = Get-Room sequencecase
-    $room.battle.guest.runNumber = 1
-    $room.battle.guest.inAttempt = $true
-    $room.battle.guest.spectating = $false
-    $room.battle.guest.updatedAt = Timestamp
-    $room.guestSeen = Timestamp
-    Assert-Status 'second sequence player starts after handoff' (Put-Room sequencecase guest $room)
+    Assert-Status 'host creates simultaneous battle' (Put-Room sequencecase host $room)
 
     Create-Room practicecase
     Assert-Status 'practice guest joins' (Join-Room practicecase guest)

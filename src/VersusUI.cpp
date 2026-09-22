@@ -142,7 +142,7 @@ std::string rulesText(GameRules const& rules) {
         ? (rules.practice ? "Fewest Attempts" : fmt::format("{} Attempts", rules.attempts))
         : fmt::format("First to {}%", rules.targetPercent);
     if (rules.practice) result += " / Practice";
-    else if (rules.sequence && rules.mode == 0) result += " / Sequence";
+    else if (rules.sequence && rules.mode == 0) result += " / Legacy Sequence";
     return result;
 }
 
@@ -602,7 +602,6 @@ class GameRulesPopup : public Popup {
     CCLabelBMFont* m_hint = nullptr;
     CCMenuItemSpriteExtra* m_mode = nullptr;
     CCMenuItemSpriteExtra* m_practice = nullptr;
-    CCMenuItemSpriteExtra* m_sequence = nullptr;
     CCMenuItemSpriteExtra* m_less = nullptr;
     CCMenuItemSpriteExtra* m_more = nullptr;
     CCMenuItemSpriteExtra* m_save = nullptr;
@@ -616,6 +615,7 @@ class GameRulesPopup : public Popup {
     bool init(RoomInfo const& room) {
         if (!Popup::init(330.f, 282.f, "GJ_square02.png")) return false;
         m_rules = room.rules;
+        m_rules.sequence = false;
         m_roomID = room.id;
         geode::addSideArt(m_mainLayer, SideArt::All, SideArtStyle::PopupBlue);
         setTitle("Game Rules", "bigFont.fnt", .65f);
@@ -630,8 +630,7 @@ class GameRulesPopup : public Popup {
         m_less = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onLess), "-", {95.f, 177.f}, .46f);
         m_more = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onMore), "+", {235.f, 177.f}, .46f);
         m_practice = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onPractice), "Practice: OFF", {165.f, 134.f}, .5f);
-        m_sequence = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onSequence), "Sequence: OFF", {165.f, 99.f}, .5f);
-        m_hint = label(m_mainLayer, "", {165.f, 70.f}, .42f, 275.f, kMuted, false, "chatFont.fnt");
+        m_hint = label(m_mainLayer, "", {165.f, 91.f}, .42f, 275.f, kMuted, false, "chatFont.fnt");
         label(m_mainLayer, "Changing rules resets both players' Ready.", {165.f, 52.f}, .36f, 285.f, kIce, false, "chatFont.fnt");
         m_save = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onSave), "Apply", {165.f, 25.f}, .56f);
         refresh();
@@ -651,30 +650,25 @@ class GameRulesPopup : public Popup {
         return true;
     }
     void refresh() {
-        if (m_rules.mode != 0 || m_rules.practice) m_rules.sequence = false;
         caption(m_mode, m_rules.mode == 0 ? "Mode: Attempts" : "Mode: Percent", .55f);
         m_valueTitle->setString(m_rules.mode == 0 ? "Attempt limit (1-99)" : "Target percent (1-100)");
         m_value->setString(std::to_string(m_rules.mode == 0 ? m_rules.attempts : m_rules.targetPercent));
         caption(m_practice, m_rules.practice ? "Practice: ON" : "Practice: OFF");
-        caption(m_sequence, m_rules.sequence ? "Sequence: ON" : "Sequence: OFF");
         bool const valueEnabled = !(m_rules.mode == 0 && m_rules.practice) && !m_pending;
         m_value->setEnabled(valueEnabled);
         m_value->getBGSprite()->setOpacity(valueEnabled ? 230 : 105);
         enabled(m_less, valueEnabled);
         enabled(m_more, valueEnabled);
-        m_sequence->setVisible(m_rules.mode == 0);
-        enabled(m_sequence, !m_rules.practice && m_rules.mode == 0 && !m_pending);
         enabled(m_mode, !m_pending);
         enabled(m_practice, !m_pending);
         m_hint->setString(m_rules.mode != 0 ? "Reach the target in your current attempt." :
             m_rules.practice ? "Clear with the fewest practice attempts." :
-            m_rules.sequence ? "Players take turns; the other watches." : "Players play at the same time.");
+            "Players play at the same time.");
     }
     void onMode(CCObject*) {
         if (!m_pending) {
             readValue();
             m_rules.mode = 1 - m_rules.mode;
-            if (m_rules.mode != 0) m_rules.sequence = false;
             refresh();
         }
     }
@@ -682,10 +676,8 @@ class GameRulesPopup : public Popup {
         if (m_pending) return;
         readValue();
         m_rules.practice = !m_rules.practice;
-        if (m_rules.practice) m_rules.sequence = false;
         refresh();
     }
-    void onSequence(CCObject*) { if (!m_pending && !m_rules.practice && m_rules.mode == 0) { readValue(); m_rules.sequence = !m_rules.sequence; refresh(); } }
     void adjust(int amount) {
         if (m_pending) return;
         readValue();

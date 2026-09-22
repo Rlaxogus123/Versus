@@ -3,12 +3,11 @@
   "gd": {
     "win": "2.2081",
     "android": "2.2081",
-    "mac": "2.2081",
-    "ios": "2.2081"
+    "mac": "2.2081"
   },
   "id": "tipp7.versus",
   "name": "Versus",
-  "version": "v0.4.7",
+  "version": "v0.4.8",
   "developer": "Tipp7",
   "description": "Create two-player Versus rooms with custom rules, ready up, and compete on the same level.",
   "dependencies": {

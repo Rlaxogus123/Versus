@@ -834,7 +834,7 @@ void Service::configureRules(GameRules rules, Done callback) {
     if (!isHost() || busy()) { callback(false, "Only the host can change game rules."); return; }
     if ((rules.mode != 0 && rules.mode != 1) || rules.attempts < 1 || rules.attempts > 99 ||
         rules.targetPercent < 1 || rules.targetPercent > 100 ||
-        (rules.practice && rules.sequence) || (rules.mode == 1 && rules.sequence)) {
+        rules.sequence) {
         callback(false, "Invalid game rules."); return;
     }
     auto const epoch = state().epoch;
@@ -944,7 +944,7 @@ void Service::startMatch(Done callback) {
         auto const rules = parseRules(std::as_const(body)["rules"]);
         if ((rules.mode != 0 && rules.mode != 1) || rules.attempts < 1 || rules.attempts > 99 ||
             rules.targetPercent < 1 || rules.targetPercent > 100 ||
-            (rules.practice && rules.sequence) || (rules.mode == 1 && rules.sequence)) return "Invalid game rules.";
+            rules.sequence) return "Sequence mode is no longer available. Apply the game rules again.";
         auto launch = Json::object();
         launch["id"] = launchId; launch["requestedAt"] = timestamp();
         launch["hostLoaded"] = false; launch["guestLoaded"] = false; launch["releasedAt"] = 0;
