@@ -9,14 +9,14 @@ Versus provides a room browser and waiting room for one-on-one matches.
   two seats: its host and one guest.
 - The waiting room downloads the selected level and audio automatically. Both
   players ready independently; changing the map or rules clears both states.
-- The host configures attempts or percentage rules, Practice, and optional
-  sequential turns. The lobby shows the active rule before joining.
+- The host configures attempts or percentage rules and Practice. The lobby
+  shows the active rule before joining.
 - Room emotes provide four rate-limited reactions in animated speech bubbles.
 - Starting loads the selected map for both players. Gameplay waits for both to
   enter, with a 60-second deadline and a shared three-second countdown.
 - Download errors, cancellation and loading timeouts return to the room.
 - Leaving as host closes the room and returns its guest to the room browser.
-- Match HUDs show both players and progress. Attempts, sequential spectating,
+- Match HUDs show both players and progress. Attempts, spectating,
   percentage ties, forced Practice, pause timeouts, forfeits, result animations,
   and recent history are synchronized through the room state.
 - Position and camera data are sent at roughly 7 Hz only while an opponent is

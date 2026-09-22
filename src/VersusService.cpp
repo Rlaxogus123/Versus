@@ -189,7 +189,8 @@ Json battlePlayerJson(BattlePlayerState const& player) {
     value["inAttempt"] = player.inAttempt;
     value["cleared"] = player.cleared;
     value["forfeited"] = player.forfeited;
-    value["cheated"] = player.cheated;
+    // Older deployed rules reject this newer optional field, even when false.
+    if (player.cheated) value["cheated"] = true;
     value["spectating"] = player.spectating;
     value["paused"] = player.paused;
     value["pausedAt"] = player.pausedAt;
@@ -343,8 +344,12 @@ std::string endpoint(std::string const& path) {
     return fmt::format("{}/{}/{}.json", firebase_config::DATABASE_URL, firebase_config::ROOT, path);
 }
 std::string networkError(web::WebResponse const& response) {
-    if (response.code() == 401 || response.code() == 403)
-        return "Access denied. Check Firebase Authentication and database rules.";
+    if (response.code() == 401 || response.code() == 403) {
+        auto body = response.json();
+        if (body && stringAt(body.unwrap(), "error").starts_with("Permission denied"))
+            return "Firebase database rules denied this request.";
+        return "Firebase authentication failed. Reconnect to Versus.";
+    }
     if (response.code() == 412) return "Room changed. Please try again.";
     return "Unable to reach Versus. Check your connection and retry.";
 }
@@ -375,9 +380,12 @@ void request(std::string method, std::string path, Json body, Response callback,
     }
     bool const clockSample = method == "PUT" && path.starts_with("rooms/") && body.isObject();
     auto const sentAt = Clock::now();
-    async::spawn(request.send(std::move(method), endpoint(path)),
-        [callback = std::move(callback), clockSample, sentAt](web::WebResponse response) mutable {
+    auto const url = endpoint(path);
+    async::spawn(request.send(std::move(method), url),
+        [callback = std::move(callback), clockSample, sentAt, path = std::move(path)](web::WebResponse response) mutable {
             syncServerClock(response);
+            if (response.code() == 401 || response.code() == 403)
+                log::warn("Versus Firebase request denied at {} (HTTP {}): {}", path, response.code(), networkError(response));
             // Our successful room writes resolve updatedAt on the server. Use
             // millisecond timestamps and half the RTT for the shared countdown;
             // the HTTP Date header only has one-second precision.
@@ -1065,7 +1073,7 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             own["inAttempt"] = progress.inAttempt;
             own["cleared"] = boolAt(own, "cleared") || progress.cleared;
             own["forfeited"] = boolAt(own, "forfeited") || progress.forfeited;
-            own["cheated"] = boolAt(own, "cheated") || progress.cheated;
+            if (progress.cheated) own["cheated"] = true;
             own["spectating"] = progress.spectating;
             auto const oldPausedAt = intAt(own, "pausedAt");
             own["paused"] = progress.paused;
@@ -1083,10 +1091,21 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             body[host ? "hostSeen" : "guestSeen"] = timestamp();
             resolveBattle(body, uid);
             return {};
-        }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
+        }, [epoch, progress, sendPosition, callback = std::move(callback)](bool ok, std::string error) mutable {
             if (epoch == state().epoch) {
                 state().writing = false;
                 state().pollTime = 2.f;
+            }
+            if (!ok && epoch == state().epoch && progress.cheated &&
+                error == "Firebase database rules denied this request.") {
+                // An older live ruleset cannot store the cheat marker. Still
+                // award the opponent the match through its existing forfeit path.
+                auto fallback = progress;
+                fallback.cheated = false;
+                fallback.forfeited = true;
+                log::warn("Versus cheat marker rejected by deployed rules; recording a loss through forfeit");
+                Service::get().reportBattle(fallback, sendPosition, std::move(callback));
+                return;
             }
             callback(ok, std::move(error));
         });

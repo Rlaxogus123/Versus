@@ -1,3 +1,10 @@
+# v0.4.9
+
+- Fix match start and ordinary progress against servers still using the previous Firebase rules by omitting the optional false cheat flag.
+- If older rules reject a detected cheat marker, record the offender's loss through the existing forfeit path.
+- Distinguish Firebase rule denials from authentication failures and log the failing database path.
+- Publish the included `firebase-rules.json` to enable shared cheat notices and early attempt wins on the live server.
+
 # v0.4.8
 
 - Remove the sequence mode control and prevent new sequence matches while retaining legacy match compatibility.
