@@ -115,8 +115,7 @@ struct Card {
 
         std::string info;
         ccColor3B tint = ccc3(136, 207, 243);
-        if (state.cheated) { info = "CHEATING DETECTED"; tint = ccc3(255, 94, 116); }
-        else if (state.forfeited) { info = "FORFEITED"; tint = ccc3(255, 146, 162); }
+        if (state.forfeited) { info = "FORFEITED"; tint = ccc3(255, 146, 162); }
         else if (state.paused) { info = "PAUSED"; tint = ccc3(255, 216, 135); }
         else if (state.cleared) { info = "CLEAR!"; tint = ccc3(138, 255, 193); }
         else if (state.spectating) info = fmt::format("WAIT | BEST {}%", state.bestPercent);

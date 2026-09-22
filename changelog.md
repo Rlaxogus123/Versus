@@ -1,3 +1,14 @@
+# v0.4.12
+
+- Remove automatic cheating detection and its alerts.
+- Separate result progress, winner, execution, and confirmation scenes with fades and a dark transition overlay.
+- Show a thin countdown line at the bottom for every result scene.
+
+# v0.4.11
+
+- Restore the desktop cursor after returning from a match.
+- Replace the Creator Layer Versus player icon with a “Versus Mode!” label.
+
 # v0.4.10
 
 - Refresh expired Firebase authentication before changing a room, including rule edits and room departure.

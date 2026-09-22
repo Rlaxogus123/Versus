@@ -4,13 +4,13 @@
 
 namespace versus::battle {
 inline bool terminal(BattlePlayerState const& player, GameRules const& rules) {
-    return player.forfeited || player.cheated || player.cleared ||
+    return player.forfeited || player.cleared ||
         (rules.mode == 0 && !rules.practice && player.attemptsUsed >= rules.attempts);
 }
 inline bool earlyAttemptWin(BattlePlayerState const& candidate, BattlePlayerState const& exhausted,
     GameRules const& rules) {
-    if (rules.mode != 0 || rules.practice || candidate.forfeited || candidate.cheated ||
-        exhausted.forfeited || exhausted.cheated ||
+    if (rules.mode != 0 || rules.practice || candidate.forfeited ||
+        exhausted.forfeited ||
         exhausted.attemptsUsed < rules.attempts || candidate.bestPercent <= exhausted.bestPercent)
         return false;
     // The ongoing run already spends an attempt, even before its death callback.
@@ -33,7 +33,6 @@ inline void reconcileProgress(BattlePlayerState& local, BattlePlayerState const&
     local.bestPercent = std::max(local.bestPercent, confirmed.bestPercent);
     local.cleared = local.cleared || confirmed.cleared;
     local.forfeited = local.forfeited || confirmed.forfeited;
-    local.cheated = local.cheated || confirmed.cheated;
     if (terminal(local, rules)) { local.inAttempt = false; local.spectating = true; }
 }
 inline bool showRunner(GameRules const& rules, BattlePlayerState const& local,

@@ -169,7 +169,6 @@ BattlePlayerState parseBattlePlayer(Json const& value) {
     result.inAttempt = boolAt(value, "inAttempt");
     result.cleared = boolAt(value, "cleared");
     result.forfeited = boolAt(value, "forfeited");
-    result.cheated = boolAt(value, "cheated");
     result.spectating = boolAt(value, "spectating");
     result.paused = boolAt(value, "paused");
     result.pausedAt = intAt(value, "pausedAt");
@@ -189,8 +188,6 @@ Json battlePlayerJson(BattlePlayerState const& player) {
     value["inAttempt"] = player.inAttempt;
     value["cleared"] = player.cleared;
     value["forfeited"] = player.forfeited;
-    // Older deployed rules reject this newer optional field, even when false.
-    if (player.cheated) value["cheated"] = true;
     value["spectating"] = player.spectating;
     value["paused"] = player.paused;
     value["pausedAt"] = player.pausedAt;
@@ -209,7 +206,7 @@ Json initialBattlePlayer(bool playing, bool spectator) {
     return battlePlayerJson(player);
 }
 bool battleTerminal(Json const& player, GameRules const& rules) {
-    if (boolAt(player, "forfeited") || boolAt(player, "cheated") || boolAt(player, "cleared")) return true;
+    if (boolAt(player, "forfeited") || boolAt(player, "cleared")) return true;
     return rules.mode == 0 && !rules.practice && intAt(player, "attemptsUsed") >= rules.attempts;
 }
 void resolveBattle(Json& body, std::string const& actorUid) {
@@ -222,9 +219,7 @@ void resolveBattle(Json& body, std::string const& actorUid) {
     auto const guest = battle["guest"];
     std::string winner;
     bool draw = false;
-    if (boolAt(host, "cheated")) winner = guestUid;
-    else if (boolAt(guest, "cheated")) winner = hostUid;
-    else if (boolAt(host, "forfeited")) winner = guestUid;
+    if (boolAt(host, "forfeited")) winner = guestUid;
     else if (boolAt(guest, "forfeited")) winner = hostUid;
     else if (intAt(host, "pausedAt") > 0 && nowMs() - intAt(host, "pausedAt") >= 30000) winner = guestUid;
     else if (intAt(guest, "pausedAt") > 0 && nowMs() - intAt(guest, "pausedAt") >= 30000) winner = hostUid;
@@ -1082,7 +1077,6 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             own["inAttempt"] = progress.inAttempt;
             own["cleared"] = boolAt(own, "cleared") || progress.cleared;
             own["forfeited"] = boolAt(own, "forfeited") || progress.forfeited;
-            if (progress.cheated) own["cheated"] = true;
             own["spectating"] = progress.spectating;
             auto const oldPausedAt = intAt(own, "pausedAt");
             own["paused"] = progress.paused;
@@ -1100,21 +1094,10 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             body[host ? "hostSeen" : "guestSeen"] = timestamp();
             resolveBattle(body, uid);
             return {};
-        }, [epoch, progress, sendPosition, callback = std::move(callback)](bool ok, std::string error) mutable {
+        }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
             if (epoch == state().epoch) {
                 state().writing = false;
                 state().pollTime = 2.f;
-            }
-            if (!ok && epoch == state().epoch && progress.cheated &&
-                error == "Firebase database rules denied this request.") {
-                // An older live ruleset cannot store the cheat marker. Still
-                // award the opponent the match through its existing forfeit path.
-                auto fallback = progress;
-                fallback.cheated = false;
-                fallback.forfeited = true;
-                log::warn("Versus cheat marker rejected by deployed rules; recording a loss through forfeit");
-                Service::get().reportBattle(fallback, sendPosition, std::move(callback));
-                return;
             }
             callback(ok, std::move(error));
         });

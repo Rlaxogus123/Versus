@@ -6,10 +6,8 @@
 #include "VersusService.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
-#include <Geode/binding/GameObject.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PauseLayer.hpp>
-#include <Geode/binding/PlayerObject.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/binding/UILayer.hpp>
 #include <algorithm>
@@ -20,9 +18,9 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr float RESULT_PROGRESS_TIME = 3.4f;
-constexpr float RESULT_WINNER_TIME = 2.2f;
-constexpr float RESULT_EXECUTION_TIME = 3.6f;
+constexpr float RESULT_PROGRESS_TIME = 5.f;
+constexpr float RESULT_WINNER_TIME = 3.5f;
+constexpr float RESULT_EXECUTION_TIME = 4.2f;
 constexpr float RESULT_CONFIRM_TIME = 20.f;
 constexpr float RESULT_CONFIRM_START = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + RESULT_EXECUTION_TIME;
 ccColor3B color(int rgb) { return ccc3((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
@@ -48,11 +46,7 @@ public:
     bool reporting = false, dirty = false, forcingQuit = false, mainMenu = false;
     bool quitDialog = false, warnedPause = false, leaving = false, timedOut = false;
     bool finished = false, spectating = false, returning = false, resultVisible = false;
-    bool winnerRevealed = false, confirmationVisible = false;
-    GameObject* firstSurvivedHazard = nullptr;
-    PlayerObject* firstSurvivedPlayer = nullptr;
-    float firstSurvivedX = 0.f;
-    Clock::time_point attemptBegan, firstSurvivedAt;
+    bool winnerRevealed = false, executionRevealed = false, confirmationVisible = false;
     int runBest = 0, lastRecordedRun = 0;
     int reportFailures = 0;
     std::string reportError;
@@ -65,9 +59,12 @@ public:
     WeakRef<CCNode> hud;
     WeakRef<BattleHUD> playerHUD;
     WeakRef<CCLabelBMFont> status, returnStatus;
-    WeakRef<CCLabelBMFont> winnerTitle, resultSubtitle, hostPercent, guestPercent;
+    WeakRef<CCLabelBMFont> hostPercent, guestPercent;
     WeakRef<CCLayerColor> hostGauge, guestGauge;
-    WeakRef<CCNode> resultPopup, resultRoot;
+    WeakRef<CCLayerColor> transitionShade, resultTimerFill;
+    WeakRef<CCNodeRGBA> progressSection, winnerSection, actorSection, resultPopup;
+    WeakRef<CCNode> resultRoot;
+    float resultTimerWidth = 0.f;
 
     static Session& get() {
         static auto* session = [] {
@@ -154,13 +151,12 @@ public:
         active = true; finished = false; leaving = false; timedOut = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; resultVisible = false;
-        winnerRevealed = false; confirmationVisible = false;
-        winnerTitle = nullptr; resultSubtitle = nullptr;
+        winnerRevealed = false; executionRevealed = false; confirmationVisible = false;
+        progressSection = nullptr; winnerSection = nullptr; actorSection = nullptr;
+        transitionShade = nullptr; resultTimerFill = nullptr;
         hostPercent = nullptr; guestPercent = nullptr;
         hostGauge = nullptr; guestGauge = nullptr;
         resultPopup = nullptr; resultRoot = nullptr;
-        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
-        attemptBegan = Clock::now();
         returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
@@ -182,28 +178,9 @@ public:
         if (blocked()) FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
     }
     int percent(PlayLayer* layer) const { return std::clamp(layer->getCurrentPercentInt(), 0, 100); }
-    void flagCheat(char const* reason) {
-        if (!active || finished || leaving || local.cheated || !sameBattle()) return;
-        local.cheated = true;
-        local.inAttempt = false;
-        local.spectating = true;
-        local.paused = false;
-        local.pausedAt = 0;
-        spectating = true;
-        dirty = true; reportTimer = 0.f;
-        log::warn("Versus detected unauthorized play: {}", reason);
-        label(status, fmt::format("CHEATING DETECTED: {}", reason));
-        FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
-        report(true);
-    }
     void sampleState(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || blocked() || local.paused || !local.inAttempt) return;
-        // Mode changes and scheduler speed are not proof of cheating. Ignore
-        // progress until the expected mode returns, without penalizing anyone.
-        if (layer->m_isTestMode || layer->m_isPracticeMode != rules.practice) {
-            firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
-            return;
-        }
+        if (layer->m_isTestMode || layer->m_isPracticeMode != rules.practice) return;
         if ((layer->m_player1 && layer->m_player1->m_isDead) ||
             (layer->m_gameState.m_isDualMode && layer->m_player2 && layer->m_player2->m_isDead)) {
             death(layer); return;
@@ -227,7 +204,6 @@ public:
     }
     void death(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || !local.inAttempt || blocked()) return;
-        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
         if (!finishAttempt(local, rules, percent(layer))) return;
         runBest = std::max(runBest, local.currentPercent); saveAttempt();
         dirty = true; reportTimer = 0.f;
@@ -252,14 +228,11 @@ public:
     }
     void resetAfter(PlayLayer* layer) {
         if (!owns(layer) || releasing || done()) return;
-        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
-        attemptBegan = Clock::now();
         local.currentPercent = 0; local.inAttempt = true; local.spectating = false; spectating = false;
         ++local.runNumber; runBest = 0; dirty = true; reportTimer = 0.f;
     }
     void pause(PlayLayer* layer, bool value) {
         if (!owns(layer) || finished || local.paused == value) return;
-        if (value) { firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr; }
         local.paused = value; local.pausedAt = value ? Service::get().serverNow() : 0;
         warnedPause = false; dirty = true; reportTimer = 0.f;
     }
@@ -326,35 +299,6 @@ public:
         }
         if (owner->m_isPaused) owner->resume();
     }
-    void survivedLethalHit(PlayLayer* layer, PlayerObject* player, GameObject* hazard) {
-        if (!owns(layer) || !player || !hazard || player->m_isDead || !local.inAttempt ||
-            blocked() || local.paused || layer->m_isPaused || layer->m_isTestMode ||
-            layer->m_isPracticeMode || rules.practice || player->m_isBeingSpawnedByDualPortal ||
-            player->m_isDashing ||
-            player->m_isLocked || hazard->m_isDisabled || hazard->m_isNoTouch ||
-            hazard->m_isPassable || (hazard->m_objectType != GameObjectType::Hazard &&
-            hazard->m_objectType != GameObjectType::AnimatedHazard)) return;
-        auto const now = Clock::now();
-        if (now - attemptBegan < std::chrono::seconds(1)) return;
-        auto const x = player->getPositionX();
-        // One destroyPlayer call can be suppressed by normal gameplay state.
-        // Require a separate lethal hazard, later in the same continuous run.
-        if (firstSurvivedHazard && firstSurvivedPlayer == player &&
-            firstSurvivedHazard != hazard &&
-            now - firstSurvivedAt >= std::chrono::milliseconds(350) &&
-            now - firstSurvivedAt <= std::chrono::seconds(8) &&
-            std::abs(x - firstSurvivedX) >= 25.f) {
-            flagCheat("NOCLIP");
-            return;
-        }
-        if (!firstSurvivedHazard || firstSurvivedPlayer != player ||
-            now - firstSurvivedAt > std::chrono::seconds(8)) {
-            firstSurvivedHazard = hazard;
-            firstSurvivedPlayer = player;
-            firstSurvivedX = x;
-            firstSurvivedAt = now;
-        }
-    }
     void onResultExit(CCObject*) {
         if (finished && confirmationVisible) exitAfterResult();
     }
@@ -376,36 +320,54 @@ public:
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         auto window = CCDirector::sharedDirector()->getWinSize();
         auto* root = CCNode::create(); root->setID("battle-result"_spr);
-        auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 220)); root->addChild(shade);
+        auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 175)); root->addChild(shade);
+        auto section = [root](int z) {
+            auto* node = CCNodeRGBA::create();
+            node->setCascadeOpacityEnabled(true);
+            node->setOpacity(0);
+            root->addChild(node, z);
+            return node;
+        };
+        auto* progress = section(5); progressSection = progress;
+        auto* curtain = CCLayerColor::create(ccc4(0, 0, 0, 0));
+        root->addChild(curtain, 10); transitionShade = curtain;
+        auto* winner = section(15); winnerSection = winner;
+        auto* actors = section(20); actorSection = actors;
         auto const winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
         auto* title = CCLabelBMFont::create(info.draw ? "DRAW" : (winnerName + " WINS!").c_str(), "bigFont.fnt");
         title->setPosition({window.width / 2.f, window.height / 2.f + 94.f});
         title->limitLabelWidth(window.width - 40.f, .75f, .3f);
-        title->setVisible(false); root->addChild(title, 10); winnerTitle = title;
-        auto resultLabel = [root, window](std::string text, float x, float y, float width, float scale,
+        winner->addChild(title, 10);
+        auto resultLabel = [window](CCNode* parent, std::string text, float x, float y, float width, float scale,
                                             char const* font = "chatFont.fnt") {
             auto* value = CCLabelBMFont::create(text.c_str(), font);
             value->setScale(std::min(scale, width / std::max(1.f, value->getContentSize().width)));
-            value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); root->addChild(value, 5); return value;
+            value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); parent->addChild(value, 5); return value;
         };
-        resultSubtitle = resultLabel(info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost",
+        resultLabel(winner, info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost",
             0.f, 65.f, window.width-40.f, .95f);
-        if (auto subtitle = resultSubtitle.lock()) subtitle->setVisible(false);
-        resultLabel(hostProfile.name, -95.f, -56.f, 170.f, .85f);
-        resultLabel(guestProfile.name, 95.f, -56.f, 170.f, .85f);
-        hostPercent = resultLabel("0%", -95.f, -79.f, 140.f, .5f, "bigFont.fnt");
+        auto* hostPreview = icon(hostProfile, 1.8f);
+        auto* guestPreview = icon(guestProfile, 1.8f);
+        guestPreview->setFlipX(true);
+        hostPreview->setPosition({window.width / 2.f - 95.f, window.height / 2.f - 10.f});
+        guestPreview->setPosition({window.width / 2.f + 95.f, window.height / 2.f - 10.f});
+        progress->addChild(hostPreview);
+        progress->addChild(guestPreview);
+        resultLabel(progress, hostProfile.name, -95.f, -56.f, 170.f, .85f);
+        resultLabel(progress, guestProfile.name, 95.f, -56.f, 170.f, .85f);
+        hostPercent = resultLabel(progress, "0%", -95.f, -79.f, 140.f, .5f, "bigFont.fnt");
         if (auto value = hostPercent.lock()) value->setColor(
             info.draw || info.winnerUid == hostProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
-        resultLabel("VS", 0.f, -79.f, 35.f, .55f, "bigFont.fnt");
-        guestPercent = resultLabel("0%", 95.f, -79.f, 140.f, .5f, "bigFont.fnt");
+        resultLabel(progress, "VS", 0.f, -79.f, 35.f, .55f, "bigFont.fnt");
+        guestPercent = resultLabel(progress, "0%", 95.f, -79.f, 140.f, .5f, "bigFont.fnt");
         if (auto value = guestPercent.lock()) value->setColor(
             info.draw || info.winnerUid == guestProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
-        auto gauge = [root, window](float x, ccColor4B tint) {
+        auto gauge = [progress, window](float x, ccColor4B tint) {
             constexpr float width = 145.f;
             auto* track = CCLayerColor::create(ccc4(28, 49, 67, 255));
             track->setContentSize({width, 7.f});
             track->setPosition({window.width / 2.f + x - width / 2.f, window.height / 2.f - 99.f});
-            root->addChild(track, 5);
+            progress->addChild(track, 5);
             auto* fill = CCLayerColor::create(tint);
             fill->setContentSize({0.f, 7.f});
             track->addChild(fill);
@@ -414,26 +376,26 @@ public:
         hostGauge = gauge(-95.f, ccc4(80, 205, 255, 255));
         guestGauge = gauge(95.f, ccc4(255, 139, 178, 255));
         if (rules.practice && rules.mode == 0) {
-            resultLabel(fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -113.f, 170.f, .6f);
-            resultLabel(fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -113.f, 170.f, .6f);
+            resultLabel(progress, fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -113.f, 170.f, .6f);
+            resultLabel(progress, fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -113.f, 170.f, .6f);
         }
-        returnStatus = resultLabel("Comparing progress...", 0.f, -133.f, window.width-40.f, .65f);
+        returnStatus = resultLabel(root, "Comparing progress...", 0.f, -133.f, window.width-40.f, .65f);
+        if (auto footer = returnStatus.lock()) footer->setZOrder(40);
         if (!info.draw) {
             auto const& loserState = info.winnerUid == hostProfile.uid ? info.guest : info.host;
-            if (loserState.cheated || loserState.forfeited || loserState.pausedAt > 0) {
+            if (loserState.forfeited || loserState.pausedAt > 0) {
                 auto* reason = CCLabelBMFont::create(
-                    loserState.cheated ? "CHEATING DETECTED" :
                     info.winnerUid == uid ? (loserState.forfeited ? "Opponent forfeited" : "Opponent timed out") :
                         (loserState.forfeited ? "Match forfeited" : "Pause timeout"), "chatFont.fnt");
                 reason->setScale(.75f);
                 reason->setPosition({window.width / 2.f, window.height / 2.f + 36.f});
-                root->addChild(reason);
+                winner->addChild(reason);
             }
         }
         auto* a = icon(hostProfile, 1.8f); auto* b = icon(guestProfile, 1.8f); b->setFlipX(true);
         a->setPosition({window.width / 2.f - 95.f, window.height / 2.f - 10.f});
         b->setPosition({window.width / 2.f + 95.f, window.height / 2.f - 10.f});
-        root->addChild(a); root->addChild(b);
+        actors->addChild(a); actors->addChild(b);
         if (!info.draw) {
             bool leftWins = info.winnerUid == hostProfile.uid;
             auto* winner = leftWins ? a : b; auto* loser = leftWins ? b : a;
@@ -441,7 +403,7 @@ public:
             unsigned variant = 0;
             for (unsigned char value : battleID) variant = variant * 33u + value;
             variant %= 3u;
-            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + .45f;
+            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + 1.f;
             if (variant == 0) {
                 // Dash-punch.
                 winner->runAction(CCSequence::create(CCDelayTime::create(executionStart),
@@ -461,7 +423,7 @@ public:
                 }
                 shot->setPosition(winner->getPosition());
                 shot->setScale(.2f);
-                root->addChild(shot, 4);
+                actors->addChild(shot, 4);
                 shot->runAction(CCSequence::create(CCDelayTime::create(executionStart),
                     CCSpawn::create(CCMoveBy::create(.9f, {direction * 190.f, 0.f}),
                         CCEaseBackOut::create(CCScaleTo::create(.6f, 1.f)), nullptr),
@@ -475,7 +437,10 @@ public:
                 CCRotateBy::create(1.3f, direction * 360.f), CCMoveBy::create(1.3f, {direction * 100.f, -70.f}),
                 CCScaleTo::create(1.3f, 0.f), nullptr), nullptr));
         }
-        auto* popup = CCNode::create(); popup->setVisible(false); popup->setID("result-confirmation"_spr);
+        auto* popup = CCNodeRGBA::create();
+        popup->setCascadeOpacityEnabled(true);
+        popup->setOpacity(0); popup->setVisible(false);
+        popup->setID("result-confirmation"_spr);
         float const panelWidth = std::min(390.f, window.width - 24.f);
         float const panelHeight = std::min(160.f, window.height - 24.f);
         auto* panel = CCLayerColor::create(ccc4(8, 29, 56, 248));
@@ -492,28 +457,45 @@ public:
         popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 27.f, .65f);
         popupLabel(fmt::format("{}  {}%  :  {}%  {}", hostProfile.name, info.host.bestPercent,
             info.guest.bestPercent, guestProfile.name), -2.f, .40f);
-        if (info.host.cheated || info.guest.cheated) {
-            popupLabel(fmt::format("CHEATING DETECTED: {}", info.host.cheated ? hostProfile.name : guestProfile.name),
-                -25.f, .4f);
-        }
         auto* menu = CCMenu::create(); menu->setPosition({window.width / 2.f, window.height / 2.f - 51.f});
         auto* button = ButtonSprite::create("Return to Room", "goldFont.fnt", "GJ_button_01.png");
         button->setScale(.72f);
         menu->addChild(CCMenuItemSpriteExtra::create(button, this, menu_selector(Session::onResultExit)));
         popup->addChild(menu, 3);
         root->addChild(popup, 50); resultPopup = popup;
+        resultTimerWidth = std::min(440.f, window.width - 48.f);
+        auto* timerTrack = CCLayerColor::create(ccc4(255, 255, 255, 48));
+        timerTrack->setContentSize({resultTimerWidth, 2.f});
+        timerTrack->setPosition({(window.width - resultTimerWidth) / 2.f, 8.f});
+        root->addChild(timerTrack, 60);
+        auto* timerFill = CCLayerColor::create(ccc4(255, 255, 255, 240));
+        timerFill->setContentSize({resultTimerWidth, 2.f});
+        timerFill->setPosition(timerTrack->getPosition());
+        root->addChild(timerFill, 61); resultTimerFill = timerFill;
         // PauseLayer and native end screens are siblings of PlayLayer. Put the
         // result above them in the scene so it remains visible for both seats.
         if (auto* scene = owner->getParent()) scene->addChild(root, 100010);
         else owner->addChild(root, 100010);
         resultRoot = root;
         resultVisible = true;
+        progress->runAction(CCFadeIn::create(.6f));
     }
     float resultElapsed() const {
         return std::chrono::duration<float>(Clock::now() - resultBegan).count();
     }
     void updateResultVisual(float elapsed) {
         if (!resultVisible) return;
+        float remaining = 0.f;
+        if (elapsed < RESULT_PROGRESS_TIME)
+            remaining = 1.f - elapsed / RESULT_PROGRESS_TIME;
+        else if (elapsed < RESULT_PROGRESS_TIME + RESULT_WINNER_TIME)
+            remaining = 1.f - (elapsed - RESULT_PROGRESS_TIME) / RESULT_WINNER_TIME;
+        else if (elapsed < RESULT_CONFIRM_START)
+            remaining = 1.f - (elapsed - RESULT_PROGRESS_TIME - RESULT_WINNER_TIME) / RESULT_EXECUTION_TIME;
+        else
+            remaining = 1.f - (elapsed - RESULT_CONFIRM_START) / RESULT_CONFIRM_TIME;
+        if (auto bar = resultTimerFill.lock())
+            bar->setContentSize({resultTimerWidth * std::clamp(remaining, 0.f, 1.f), 2.f});
         auto progress = std::clamp(elapsed / RESULT_PROGRESS_TIME, 0.f, 1.f);
         progress = progress * progress * (3.f - 2.f * progress);
         int const hostValue = static_cast<int>(std::round(finalResult.host.bestPercent * progress));
@@ -534,19 +516,19 @@ public:
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
-            if (auto title = winnerTitle.lock()) {
-                title->setVisible(true);
-                title->setScale(title->getScale() * .55f);
-                title->runAction(CCEaseBackOut::create(CCScaleBy::create(.8f, 1.f / .55f)));
+            if (auto section = progressSection.lock()) section->runAction(CCFadeOut::create(.3f));
+            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 100));
+            if (auto section = winnerSection.lock()) {
+                section->runAction(CCSequence::create(CCDelayTime::create(.3f),
+                    CCFadeIn::create(.65f), nullptr));
             }
-            if (auto subtitle = resultSubtitle.lock()) subtitle->setVisible(true);
-            if (auto root = resultRoot.lock()) {
+            if (!finalResult.draw) if (auto result = resultRoot.lock()) {
                 auto window = CCDirector::sharedDirector()->getWinSize();
                 for (float offset : {-90.f, 90.f}) {
                     auto* burst = CCParticleExplosion::create();
                     burst->setTotalParticles(90);
                     burst->setPosition({window.width / 2.f + offset, window.height / 2.f + 35.f});
-                    root->addChild(burst, 15);
+                    result->addChild(burst, 16);
                 }
             }
         }
@@ -555,12 +537,28 @@ public:
             return;
         }
         if (elapsed < RESULT_CONFIRM_START) {
+            if (!executionRevealed) {
+                executionRevealed = true;
+                if (!finalResult.draw) {
+                    if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.3f));
+                    if (auto section = actorSection.lock())
+                        section->runAction(CCSequence::create(CCDelayTime::create(.3f),
+                            CCFadeIn::create(.55f), nullptr));
+                }
+            }
             label(returnStatus, finalResult.draw ? "Finalizing result..." : "Finishing move...");
             return;
         }
         if (!confirmationVisible) {
             confirmationVisible = true;
-            if (auto popup = resultPopup.lock()) popup->setVisible(true);
+            if (auto section = actorSection.lock()) section->runAction(CCFadeOut::create(.35f));
+            if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.35f));
+            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.35f, 120));
+            if (auto popup = resultPopup.lock()) {
+                popup->setVisible(true);
+                popup->runAction(CCSequence::create(CCDelayTime::create(.35f),
+                    CCFadeIn::create(.7f), nullptr));
+            }
         }
         auto seconds = std::max(0, static_cast<int>(std::ceil(
             RESULT_CONFIRM_START + RESULT_CONFIRM_TIME - elapsed)));
@@ -673,7 +671,6 @@ public:
                 label(status, fmt::format("{} goes first\nStarting in {}", name, (revealUntil - now + 999) / 1000));
             }
             else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError :
-                local.cheated ? "CHEATING DETECTED - match lost" : other.cheated ? "Opponent cheating detected" :
                 timedOut ? "Pause limit reached. Waiting for result..." : local.paused ? "Paused - 30s maximum" :
                 other.paused ? "Opponent paused" : spectating && terminal(other, rules) ? "Confirming match result..." : "");
         }
@@ -687,9 +684,6 @@ bool blocksInput(GJBaseGameLayer* layer) { return blocksGameplay(layer); }
 bool blocksPause(GJBaseGameLayer* layer) { auto& s = Session::get(); return s.owns(layer) && (s.finished || s.leaving); }
 void sample(PlayLayer* layer) { Session::get().sampleState(layer); }
 void died(PlayLayer* layer) { Session::get().death(layer); }
-void survivedLethalHit(PlayLayer* layer, PlayerObject* player, GameObject* hazard) {
-    Session::get().survivedLethalHit(layer, player, hazard);
-}
 void completed(PlayLayer* layer) { Session::get().clear(layer); }
 bool beforeReset(PlayLayer* layer) { return Session::get().resetBefore(layer); }
 void afterReset(PlayLayer* layer) { Session::get().resetAfter(layer); }
