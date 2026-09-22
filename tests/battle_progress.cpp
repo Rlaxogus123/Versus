@@ -21,6 +21,16 @@ int main() {
     auto old = a; old.attemptsUsed = 0; old.bestPercent = 10; old.inAttempt = true;
     reconcileProgress(a, old, rules);
     require(a.attemptsUsed == 2 && a.bestPercent == 80 && !a.inAttempt, "stale response cannot revive run");
+    rules.attempts = 3; a = {}; b = {};
+    a.attemptsUsed = 1; a.inAttempt = true; a.bestPercent = 60;
+    b.attemptsUsed = 3; b.bestPercent = 45;
+    require(earlyAttemptWin(a, b, rules), "higher percent on fewer attempts resolves early");
+    b.attemptsUsed = 2;
+    require(!earlyAttemptWin(a, b, rules), "opponent with a remaining attempt can still respond");
+    b.attemptsUsed = 3; a.attemptsUsed = 2;
+    require(!earlyAttemptWin(a, b, rules), "current run counts toward attempts spent");
+    a.attemptsUsed = 1; a.bestPercent = 45;
+    require(!earlyAttemptWin(a, b, rules), "equal percent cannot resolve early");
     rules.sequence = true; a = {}; b = {}; b.inAttempt = true;
     require(showRunner(rules, a, b, true, false, false), "second sequence player waits in runner");
     require(!showRunner(rules, a, b, true, false, true), "coin reveal precedes runner");

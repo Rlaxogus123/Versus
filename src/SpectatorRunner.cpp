@@ -1,12 +1,33 @@
 #include "SpectatorRunner.hpp"
 #include "RunnerPhysics.hpp"
-#include <Geode/binding/AnimatedGameObject.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <cmath>
 #include <random>
 using namespace geode::prelude;
 namespace versus {
+namespace {
+CCDrawNode* batMonster() {
+    auto* bat = CCDrawNode::create();
+    ccColor4F black = {0.f, 0.f, 0.f, 1.f};
+    CCPoint leftWing[] = {{-4.f, 2.f}, {-11.f, 9.f}, {-22.f, 6.f},
+        {-19.f, 0.f}, {-27.f, -5.f}, {-17.f, -6.f}, {-12.f, -3.f}, {-4.f, -5.f}};
+    CCPoint rightWing[] = {{4.f, 2.f}, {11.f, 9.f}, {22.f, 6.f},
+        {19.f, 0.f}, {27.f, -5.f}, {17.f, -6.f}, {12.f, -3.f}, {4.f, -5.f}};
+    bat->drawPolygon(leftWing, 8, black, 0.f, black);
+    bat->drawPolygon(rightWing, 8, black, 0.f, black);
+    bat->drawDot({0.f, 0.f}, 8.f, black);
+    CCPoint leftEar[] = {{-6.f, 4.f}, {-6.f, 12.f}, {-1.f, 7.f}};
+    CCPoint rightEar[] = {{6.f, 4.f}, {6.f, 12.f}, {1.f, 7.f}};
+    bat->drawPolygon(leftEar, 3, black, 0.f, black);
+    bat->drawPolygon(rightEar, 3, black, 0.f, black);
+    bat->drawDot({-3.f, 1.f}, 2.f, {1.f, 1.f, 1.f, 1.f});
+    bat->drawDot({3.f, 1.f}, 2.f, {1.f, 1.f, 1.f, 1.f});
+    bat->drawDot({-2.5f, 1.f}, .8f, black);
+    bat->drawDot({3.5f, 1.f}, .8f, black);
+    return bat;
+}
+}
 struct SpectatorRunner::Impl {
     struct Strip { std::vector<CCSprite*> tiles; float width, offset = 0.f, factor; };
     struct Obstacle { CCNode* node; float x, y, halfWidth, halfHeight; bool flying; };
@@ -39,14 +60,13 @@ void preloadRunnerAssets() {
     CCTextureCache::sharedTextureCache()->addImage("game_bg_01_001.png", false);
     CCTextureCache::sharedTextureCache()->addImage("groundSquare_01_001.png", false);
     CCSprite::createWithSpriteFrameName("spike_01_001.png");
-    AnimatedGameObject::create(918);
 }
 bool SpectatorRunner::init(PlayerProfile const& profile, GameRules const& rules) {
     if (!CCLayer::init()) return false;
     setID("spectator-runner"_spr); m->rules = rules;
     auto window = CCDirector::sharedDirector()->getWinSize();
-    float width = std::min(430.f, window.width - 32.f), height = std::min(226.f, window.height - 76.f);
-    auto origin = CCPoint{(window.width-width)/2.f, (window.height-height)/2.f-8.f};
+    float width = std::min(510.f, window.width - 20.f), height = std::min(275.f, window.height - 20.f);
+    auto origin = CCPoint{(window.width-width)/2.f, (window.height-height)/2.f};
     auto* shade = CCLayerColor::create(ccc4(3, 13, 35, 205)); addChild(shade);
     auto* panel = CCScale9Sprite::create("square02b_001.png"); panel->setColor(ccc3(10, 45, 92));
     panel->setContentSize({width,height}); panel->setPosition(origin+CCPoint{width/2.f,height/2.f}); addChild(panel);
@@ -80,8 +100,8 @@ bool SpectatorRunner::init(PlayerProfile const& profile, GameRules const& rules)
     strip("groundSquare_01_001.png",20.f,ccc3(75,190,245),1.f);
     m->avatar=SimplePlayer::create(std::clamp(profile.icon,1,std::max(1,GameManager::sharedState()->countForType(IconType::Cube))));
     m->avatar->setColors(ccc3((profile.color1>>16)&255,(profile.color1>>8)&255,profile.color1&255),ccc3((profile.color2>>16)&255,(profile.color2>>8)&255,profile.color2&255));
-    m->avatar->setScale(.6f);clip->addChild(m->avatar,3);
-    m->percent=CCLabelBMFont::create("0%","bigFont.fnt");m->percent->setScale(.28f);clip->addChild(m->percent,4);
+    m->avatar->setScale(.9f);clip->addChild(m->avatar,3);
+    m->percent=CCLabelBMFont::create("0%","bigFont.fnt");m->percent->setScale(.38f);clip->addChild(m->percent,4);
     setTouchEnabled(true);setKeyboardEnabled(true);scheduleUpdate();update(0.f);
     return true;
 }
@@ -112,14 +132,15 @@ void SpectatorRunner::update(float dt) {
         m->distance+=dt*speed;m->spawn-=dt;
         if(m->spawn<=0.f&&m->obstacles.size()<5){
             bool flying=m->distance>350.f&&m->random()%3==0;
-            CCNode* node=flying?static_cast<CCNode*>(AnimatedGameObject::create(918)):static_cast<CCNode*>(CCSprite::createWithSpriteFrameName("spike_01_001.png"));
-            if(node){node->setScale(flying?.42f:.65f);m->field->addChild(node,2);m->obstacles.push_back({node,m->width+30.f,flying?(m->random()%2?56.f:82.f):29.f,flying?10.f:7.f,flying?10.f:9.f,flying});}
+            CCNode* node=flying?static_cast<CCNode*>(batMonster()):static_cast<CCNode*>(CCSprite::createWithSpriteFrameName("spike_01_001.png"));
+            if(node){node->setScale(flying?.92f:.75f);m->field->addChild(node,2);m->obstacles.push_back({node,m->width+30.f,flying?(m->random()%2?66.f:94.f):29.f,flying?20.f:8.f,flying?9.f:10.f,flying});}
             m->spawn=1.05f+(m->random()%60)/100.f;
         }
         for(auto& obstacle:m->obstacles){
             obstacle.x-=dt*speed;
             float y=obstacle.y+(obstacle.flying?std::sin(m->time*6.f)*3.f:0.f);
             obstacle.node->setPosition({obstacle.x,y});
+            if (obstacle.flying) obstacle.node->setScaleY(.77f + .2f * std::sin(m->time * 14.f + obstacle.x * .03f));
             if(std::abs(obstacle.x-55.f)<obstacle.halfWidth+7.f&&std::abs(y-(29.f+m->jump.height))<obstacle.halfHeight+7.f){
                 m->dead=true;m->deathTime=0.f;m->jump.release();m->avatar->setOpacity(140);
                 m->best=std::max(m->best,static_cast<int>(m->distance/10.f));m->displayedScore=-1;m->hint->setString("Crashed! Tap / Space to retry");

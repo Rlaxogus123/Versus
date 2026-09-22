@@ -1206,11 +1206,14 @@ class RoomLayer : public SceneLayer {
             (room.battle ? fmt::format(":{}:{}:{}", room.battle->finishedAt, room.battle->hostReturned, room.battle->guestReturned) : "");
     }
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
-        CCPoint origin, CCSize size, bool mine, bool host, bool ready) {
+        CCPoint origin, CCSize size, bool mine, bool host, bool ready, bool checkingResult = false) {
         auto* card = panel(parent, origin, size, false);
         label(card, mine ? "YOU" : "OPPONENT", {size.width / 2.f, size.height - 13.f}, .29f, size.width - 12.f, kIce);
         if (profile) {
-            player(card, *profile, {size.width / 2.f, size.height - 46.f}, 1.3f);
+            if (checkingResult) {
+                label(card, "CHECKING RESULT...", {size.width / 2.f, size.height - 46.f},
+                    .32f, size.width - 12.f, kIce);
+            } else player(card, *profile, {size.width / 2.f, size.height - 46.f}, 1.3f);
             readyBadge(card, {size.width / 2.f, size.height - 73.f}, ready);
             label(card, profile->name, {size.width / 2.f, size.height - 94.f}, .45f, size.width - 16.f);
             label(card, host ? "HOST" : "CHALLENGER", {size.width / 2.f, 43.f}, .22f, size.width - 15.f, kIce);
@@ -1265,7 +1268,10 @@ class RoomLayer : public SceneLayer {
         bool const myReady = host ? room.hostReady : room.guestReady;
         bool const opponentReady = host ? room.guestReady : room.hostReady;
         playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, true, host, myReady);
-        playerCard(frame, opponent, {width - cardWidth - 12.f, 48.f}, {cardWidth, cardHeight}, false, !host, opponentReady);
+        bool const opponentChecking = room.battle && room.battle->finishedAt > 0 &&
+            (host ? !room.battle->guestReturned : !room.battle->hostReturned);
+        playerCard(frame, opponent, {width - cardWidth - 12.f, 48.f}, {cardWidth, cardHeight},
+            false, !host, opponentReady, opponentChecking);
         float const centerWidth = width - 2.f * cardWidth - 40.f;
         float const centerX = width / 2.f;
         // The native sprite's NA/Auto values are reversed from GJDifficulty.

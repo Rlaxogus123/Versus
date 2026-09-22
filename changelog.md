@@ -1,3 +1,12 @@
+# v0.4.7
+
+- Put clean, edge-aligned player cards in the match HUD and use Life Calculator's heart shape.
+- Enlarge the spectator runner and replace its flying enemy with a black bat with white eyes.
+- End an attempt battle early after the opponent exhausts their attempts when a player leads with fewer attempts.
+- Detect suspicious noclip, repeated midair jumps, speed changes, and forbidden test/practice mode; report the offender as the loser.
+- Stage the result with animated progress bars, winner effects, a finishing move, and a confirmation screen with a return button and 20-second timer.
+- Show a result-review notice in the room while the other player is still viewing the result.
+
 # v0.4.6
 
 - Show the winner's nickname and each player's best percentage throughout the result animation.

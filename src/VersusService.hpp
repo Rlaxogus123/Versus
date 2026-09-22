@@ -55,6 +55,7 @@ struct BattlePlayerState {
     bool inAttempt = false;
     bool cleared = false;
     bool forfeited = false;
+    bool cheated = false;
     bool spectating = false;
     bool paused = false;
     int64_t pausedAt = 0;

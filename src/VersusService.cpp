@@ -1,6 +1,7 @@
 #include "VersusService.hpp"
 #include "FirebaseConfig.hpp"
 #include "RoomMembership.hpp"
+#include "BattleProgress.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -168,6 +169,7 @@ BattlePlayerState parseBattlePlayer(Json const& value) {
     result.inAttempt = boolAt(value, "inAttempt");
     result.cleared = boolAt(value, "cleared");
     result.forfeited = boolAt(value, "forfeited");
+    result.cheated = boolAt(value, "cheated");
     result.spectating = boolAt(value, "spectating");
     result.paused = boolAt(value, "paused");
     result.pausedAt = intAt(value, "pausedAt");
@@ -187,6 +189,7 @@ Json battlePlayerJson(BattlePlayerState const& player) {
     value["inAttempt"] = player.inAttempt;
     value["cleared"] = player.cleared;
     value["forfeited"] = player.forfeited;
+    value["cheated"] = player.cheated;
     value["spectating"] = player.spectating;
     value["paused"] = player.paused;
     value["pausedAt"] = player.pausedAt;
@@ -205,7 +208,7 @@ Json initialBattlePlayer(bool playing, bool spectator) {
     return battlePlayerJson(player);
 }
 bool battleTerminal(Json const& player, GameRules const& rules) {
-    if (boolAt(player, "forfeited") || boolAt(player, "cleared")) return true;
+    if (boolAt(player, "forfeited") || boolAt(player, "cheated") || boolAt(player, "cleared")) return true;
     return rules.mode == 0 && !rules.practice && intAt(player, "attemptsUsed") >= rules.attempts;
 }
 void resolveBattle(Json& body, std::string const& actorUid) {
@@ -218,7 +221,9 @@ void resolveBattle(Json& body, std::string const& actorUid) {
     auto const guest = battle["guest"];
     std::string winner;
     bool draw = false;
-    if (boolAt(host, "forfeited")) winner = guestUid;
+    if (boolAt(host, "cheated")) winner = guestUid;
+    else if (boolAt(guest, "cheated")) winner = hostUid;
+    else if (boolAt(host, "forfeited")) winner = guestUid;
     else if (boolAt(guest, "forfeited")) winner = hostUid;
     else if (intAt(host, "pausedAt") > 0 && nowMs() - intAt(host, "pausedAt") >= 30000) winner = guestUid;
     else if (intAt(guest, "pausedAt") > 0 && nowMs() - intAt(guest, "pausedAt") >= 30000) winner = hostUid;
@@ -251,7 +256,11 @@ void resolveBattle(Json& body, std::string const& actorUid) {
             auto const& first = stringAt(battle, "firstUid") == hostUid ? host : guest;
             if (battleTerminal(first, rules)) battle["activeUid"] = stringAt(battle, "firstUid") == hostUid ? guestUid : hostUid;
         }
-        if ((rules.practice && boolAt(host, "cleared") && boolAt(guest, "cleared")) ||
+        auto const hostState = parseBattlePlayer(host);
+        auto const guestState = parseBattlePlayer(guest);
+        if (battle::earlyAttemptWin(hostState, guestState, rules)) winner = hostUid;
+        else if (battle::earlyAttemptWin(guestState, hostState, rules)) winner = guestUid;
+        else if ((rules.practice && boolAt(host, "cleared") && boolAt(guest, "cleared")) ||
             (!rules.practice && hostDone && guestDone)) {
             int const hostScore = rules.practice ? -static_cast<int>(intAt(host, "attemptsUsed"))
                 : static_cast<int>(intAt(host, "bestPercent"));
@@ -1056,6 +1065,7 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             own["inAttempt"] = progress.inAttempt;
             own["cleared"] = boolAt(own, "cleared") || progress.cleared;
             own["forfeited"] = boolAt(own, "forfeited") || progress.forfeited;
+            own["cheated"] = boolAt(own, "cheated") || progress.cheated;
             own["spectating"] = progress.spectating;
             auto const oldPausedAt = intAt(own, "pausedAt");
             own["paused"] = progress.paused;

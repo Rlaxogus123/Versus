@@ -509,9 +509,10 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
         // GD uses nullptr to mean player one on several death paths.
         auto* effective = player ? player : m_player1;
         PlayLayer::destroyPlayer(player, object);
-        if (effective && effective->m_isDead &&
-            (effective == m_player1 || (m_gameState.m_isDualMode && effective == m_player2)))
-            versus::battle::died(this);
+        if (effective && (effective == m_player1 || (m_gameState.m_isDualMode && effective == m_player2))) {
+            if (effective->m_isDead) versus::battle::died(this);
+            else versus::battle::survivedLethalHit(this, effective, object);
+        }
     }
     void levelComplete() {
         PlayLayer::levelComplete();

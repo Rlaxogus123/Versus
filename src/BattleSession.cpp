@@ -19,7 +19,11 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr auto RESULT_DISPLAY_TIME = std::chrono::seconds(7);
+constexpr float RESULT_PROGRESS_TIME = 3.4f;
+constexpr float RESULT_WINNER_TIME = 2.2f;
+constexpr float RESULT_EXECUTION_TIME = 3.6f;
+constexpr float RESULT_CONFIRM_TIME = 20.f;
+constexpr float RESULT_CONFIRM_START = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + RESULT_EXECUTION_TIME;
 ccColor3B color(int rgb) { return ccc3((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
 SimplePlayer* icon(PlayerProfile const& profile, float scale = .85f) {
     auto* manager = GameManager::sharedState();
@@ -38,10 +42,16 @@ public:
     GameRules rules;
     BattlePlayerState local;
     BattlePlayerState other;
+    BattleInfo finalResult;
     bool host = false, active = false, releasing = false, startingTurn = false;
     bool reporting = false, dirty = false, forcingQuit = false, mainMenu = false;
     bool quitDialog = false, warnedPause = false, leaving = false, timedOut = false;
     bool finished = false, spectating = false, returning = false, resultVisible = false;
+    bool winnerRevealed = false, confirmationVisible = false;
+    bool previousAirborne = false, motionSampled = false;
+    int airJumpImpulses = 0, speedAnomalyFrames = 0;
+    double previousYVelocity = 0., jumpDirection = 0.;
+    Clock::time_point previousMotionSample;
     int runBest = 0, lastRecordedRun = 0;
     int reportFailures = 0;
     std::string reportError;
@@ -54,6 +64,9 @@ public:
     WeakRef<CCNode> hud;
     WeakRef<BattleHUD> playerHUD;
     WeakRef<CCLabelBMFont> status, returnStatus;
+    WeakRef<CCLabelBMFont> winnerTitle, resultSubtitle, hostPercent, guestPercent;
+    WeakRef<CCLayerColor> hostGauge, guestGauge;
+    WeakRef<CCNode> resultPopup, resultRoot;
 
     static Session& get() {
         static auto* session = [] {
@@ -88,6 +101,12 @@ public:
     }
     void hudSetup(PlayLayer* layer) {
         auto window = CCDirector::sharedDirector()->getWinSize();
+        if (auto* ui = layer->m_uiLayer) {
+            if (auto* pause = ui->m_pauseBtn) {
+                if (auto* parent = pause->getParent())
+                    pause->setPosition(parent->convertToNodeSpace({window.width / 2.f, window.height - 26.f}));
+            }
+        }
         auto* root = CCNode::create();
         root->setID("battle-hud"_spr);
         auto* cards = BattleHUD::create(hostProfile, guestProfile, rules);
@@ -134,6 +153,14 @@ public:
         active = true; finished = false; leaving = false; timedOut = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; resultVisible = false;
+        winnerRevealed = false; confirmationVisible = false;
+        winnerTitle = nullptr; resultSubtitle = nullptr;
+        hostPercent = nullptr; guestPercent = nullptr;
+        hostGauge = nullptr; guestGauge = nullptr;
+        resultPopup = nullptr; resultRoot = nullptr;
+        previousAirborne = false; motionSampled = false;
+        airJumpImpulses = 0; speedAnomalyFrames = 0;
+        previousYVelocity = 0.; jumpDirection = 0.;
         returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
@@ -155,8 +182,62 @@ public:
         if (blocked()) FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
     }
     int percent(PlayLayer* layer) const { return std::clamp(layer->getCurrentPercentInt(), 0, 100); }
+    void flagCheat(char const* reason) {
+        if (!active || finished || leaving || local.cheated || !sameBattle()) return;
+        local.cheated = true;
+        local.inAttempt = false;
+        local.spectating = true;
+        local.paused = false;
+        local.pausedAt = 0;
+        spectating = true;
+        dirty = true; reportTimer = 0.f;
+        log::warn("Versus detected unauthorized play: {}", reason);
+        label(status, fmt::format("CHEATING DETECTED: {}", reason));
+        FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+        report(true);
+    }
+    void inspectMotion(PlayLayer* layer) {
+        if (layer->m_isTestMode) { flagCheat("TEST MODE"); return; }
+        if (layer->m_isPracticeMode != rules.practice) { flagCheat("PRACTICE OVERRIDE"); return; }
+        float const timeScale = CCDirector::sharedDirector()->getScheduler()->getTimeScale();
+        speedAnomalyFrames = timeScale > 1.05f || (timeScale > 0.f && timeScale < .95f)
+            ? speedAnomalyFrames + 1 : 0;
+        if (speedAnomalyFrames >= 6) { flagCheat("SPEED HACK"); return; }
+
+        auto* player = layer->m_player1;
+        if (!player || player->m_isShip || player->m_isBird || player->m_isBall ||
+            player->m_isDart || player->m_isRobot || player->m_isSpider ||
+            player->m_isSwing || player->m_isDashing) {
+            motionSampled = false; airJumpImpulses = 0; return;
+        }
+        auto const now = Clock::now();
+        bool const airborne = !player->m_isOnGround;
+        double const velocity = player->m_yVelocity;
+        if (motionSampled) {
+            auto const gap = std::chrono::duration<float>(now - previousMotionSample).count();
+            if (gap < .004f) return; // Other hooks can sample the same frame.
+            if (gap > .12f) { motionSampled = false; airJumpImpulses = 0; }
+        }
+        if (motionSampled && airborne && !previousAirborne && std::abs(velocity) > 5.) {
+            jumpDirection = velocity > 0. ? 1. : -1.;
+            airJumpImpulses = 0;
+        }
+        if (motionSampled && airborne && previousAirborne && jumpDirection != 0. &&
+            !player->m_touchedRing && !player->m_ringJumpRelated &&
+            velocity * jumpDirection > 8. &&
+            (velocity - previousYVelocity) * jumpDirection > 8.) {
+            if (++airJumpImpulses >= 3) { flagCheat("JUMP HACK"); return; }
+        }
+        if (!airborne) { airJumpImpulses = 0; jumpDirection = 0.; }
+        previousAirborne = airborne;
+        previousYVelocity = velocity;
+        previousMotionSample = now;
+        motionSampled = true;
+    }
     void sampleState(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || blocked() || local.paused || !local.inAttempt) return;
+        inspectMotion(layer);
+        if (local.cheated) return;
         if ((layer->m_player1 && layer->m_player1->m_isDead) ||
             (layer->m_gameState.m_isDualMode && layer->m_player2 && layer->m_player2->m_isDead)) {
             death(layer); return;
@@ -247,7 +328,10 @@ public:
     }
     bool askQuit(PlayLayer* layer) {
         if (!owns(layer) || forcingQuit) return false;
-        if (finished) return true; // Keep the result on screen for its full duration.
+        if (finished) {
+            if (confirmationVisible) exitAfterResult();
+            return true;
+        }
         if (quitDialog || leaving) return true;
         quitDialog = true;
         auto epoch = generation;
@@ -272,6 +356,14 @@ public:
         }
         if (owner->m_isPaused) owner->resume();
     }
+    void survivedLethalHit(PlayLayer* layer, PlayerObject* player, GameObject* hazard) {
+        if (owns(layer) && player && hazard && !player->m_isDead && local.inAttempt &&
+            !blocked() && !local.paused && Service::get().serverNow() >= revealUntil)
+            flagCheat("NOCLIP");
+    }
+    void onResultExit(CCObject*) {
+        if (finished && confirmationVisible) exitAfterResult();
+    }
     void endVisual(BattleInfo const& info) {
         if (finished || leaving) return;
         if (local.inAttempt) {
@@ -279,7 +371,7 @@ public:
             runBest = std::min(runBest, final.bestPercent);
             saveAttempt();
         }
-        finished = true; resultBegan = Clock::now();
+        finished = true; finalResult = info; resultBegan = Clock::now();
         if (auto game = runner.lock()) game->removeFromParent(); runner = nullptr;
         auto owner = play.lock(); if (!owner) return;
         dismissPause(owner.data());
@@ -293,30 +385,49 @@ public:
         auto const winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
         auto* title = CCLabelBMFont::create(info.draw ? "DRAW" : (winnerName + " WINS!").c_str(), "bigFont.fnt");
         title->setPosition({window.width / 2.f, window.height / 2.f + 94.f});
-        title->limitLabelWidth(window.width - 40.f, .75f, .3f); root->addChild(title);
+        title->limitLabelWidth(window.width - 40.f, .75f, .3f);
+        title->setVisible(false); root->addChild(title, 10); winnerTitle = title;
         auto resultLabel = [root, window](std::string text, float x, float y, float width, float scale,
                                             char const* font = "chatFont.fnt") {
             auto* value = CCLabelBMFont::create(text.c_str(), font);
             value->setScale(std::min(scale, width / std::max(1.f, value->getContentSize().width)));
             value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); root->addChild(value, 5); return value;
         };
-        resultLabel(info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost", 0.f, 65.f, window.width-40.f, .95f);
+        resultSubtitle = resultLabel(info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost",
+            0.f, 65.f, window.width-40.f, .95f);
+        if (auto subtitle = resultSubtitle.lock()) subtitle->setVisible(false);
         resultLabel(hostProfile.name, -95.f, -56.f, 170.f, .85f);
         resultLabel(guestProfile.name, 95.f, -56.f, 170.f, .85f);
-        resultLabel(fmt::format("{}%", info.host.bestPercent), -95.f, -79.f, 140.f, .5f, "bigFont.fnt")
-            ->setColor(info.draw || info.winnerUid == hostProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
+        hostPercent = resultLabel("0%", -95.f, -79.f, 140.f, .5f, "bigFont.fnt");
+        if (auto value = hostPercent.lock()) value->setColor(
+            info.draw || info.winnerUid == hostProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
         resultLabel("VS", 0.f, -79.f, 35.f, .55f, "bigFont.fnt");
-        resultLabel(fmt::format("{}%", info.guest.bestPercent), 95.f, -79.f, 140.f, .5f, "bigFont.fnt")
-            ->setColor(info.draw || info.winnerUid == guestProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
+        guestPercent = resultLabel("0%", 95.f, -79.f, 140.f, .5f, "bigFont.fnt");
+        if (auto value = guestPercent.lock()) value->setColor(
+            info.draw || info.winnerUid == guestProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
+        auto gauge = [root, window](float x, ccColor4B tint) {
+            constexpr float width = 145.f;
+            auto* track = CCLayerColor::create(ccc4(28, 49, 67, 255));
+            track->setContentSize({width, 7.f});
+            track->setPosition({window.width / 2.f + x - width / 2.f, window.height / 2.f - 99.f});
+            root->addChild(track, 5);
+            auto* fill = CCLayerColor::create(tint);
+            fill->setContentSize({0.f, 7.f});
+            track->addChild(fill);
+            return fill;
+        };
+        hostGauge = gauge(-95.f, ccc4(80, 205, 255, 255));
+        guestGauge = gauge(95.f, ccc4(255, 139, 178, 255));
         if (rules.practice && rules.mode == 0) {
-            resultLabel(fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -96.f, 170.f, .6f);
-            resultLabel(fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -96.f, 170.f, .6f);
+            resultLabel(fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -113.f, 170.f, .6f);
+            resultLabel(fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -113.f, 170.f, .6f);
         }
-        returnStatus = resultLabel("Returning to the room in 7...", 0.f, -118.f, window.width-40.f, .65f);
+        returnStatus = resultLabel("Comparing progress...", 0.f, -133.f, window.width-40.f, .65f);
         if (!info.draw) {
             auto const& loserState = info.winnerUid == hostProfile.uid ? info.guest : info.host;
-            if (loserState.forfeited || loserState.pausedAt > 0) {
+            if (loserState.cheated || loserState.forfeited || loserState.pausedAt > 0) {
                 auto* reason = CCLabelBMFont::create(
+                    loserState.cheated ? "CHEATING DETECTED" :
                     info.winnerUid == uid ? (loserState.forfeited ? "Opponent forfeited" : "Opponent timed out") :
                         (loserState.forfeited ? "Match forfeited" : "Pause timeout"), "chatFont.fnt");
                 reason->setScale(.75f);
@@ -335,11 +446,12 @@ public:
             unsigned variant = 0;
             for (unsigned char value : battleID) variant = variant * 33u + value;
             variant %= 3u;
+            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + .45f;
             if (variant == 0) {
                 // Dash-punch.
-                winner->runAction(CCSequence::create(CCDelayTime::create(.5f),
-                    CCEaseBackIn::create(CCMoveBy::create(.22f, {direction * 145.f, 0.f})),
-                    CCMoveBy::create(.35f, {-direction * 45.f, 0.f}), nullptr));
+                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart),
+                    CCEaseBackIn::create(CCMoveBy::create(.55f, {direction * 145.f, 0.f})),
+                    CCMoveBy::create(.75f, {-direction * 45.f, 0.f}), nullptr));
             }
             else {
                 // Fireball or spike volley, selected consistently for both clients.
@@ -355,24 +467,109 @@ public:
                 shot->setPosition(winner->getPosition());
                 shot->setScale(.2f);
                 root->addChild(shot, 4);
-                shot->runAction(CCSequence::create(CCDelayTime::create(.45f),
-                    CCSpawn::create(CCMoveBy::create(.35f, {direction * 190.f, 0.f}),
-                        CCEaseBackOut::create(CCScaleTo::create(.2f, 1.f)), nullptr),
+                shot->runAction(CCSequence::create(CCDelayTime::create(executionStart),
+                    CCSpawn::create(CCMoveBy::create(.9f, {direction * 190.f, 0.f}),
+                        CCEaseBackOut::create(CCScaleTo::create(.6f, 1.f)), nullptr),
                     CCRemoveSelf::create(), nullptr));
-                winner->runAction(CCSequence::create(CCDelayTime::create(.42f),
-                    CCRotateBy::create(.12f, -direction * 18.f),
-                    CCRotateBy::create(.2f, direction * 18.f), nullptr));
+                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart),
+                    CCRotateBy::create(.4f, -direction * 18.f),
+                    CCRotateBy::create(.6f, direction * 18.f), nullptr));
             }
-            float const impactDelay = variant == 0 ? .72f : .80f;
+            float const impactDelay = executionStart + (variant == 0 ? .55f : .9f);
             loser->runAction(CCSequence::create(CCDelayTime::create(impactDelay), CCSpawn::create(
-                CCRotateBy::create(.5f, direction * 360.f), CCMoveBy::create(.5f, {direction * 100.f, -70.f}),
-                CCScaleTo::create(.5f, 0.f), nullptr), nullptr));
+                CCRotateBy::create(1.3f, direction * 360.f), CCMoveBy::create(1.3f, {direction * 100.f, -70.f}),
+                CCScaleTo::create(1.3f, 0.f), nullptr), nullptr));
         }
+        auto* popup = CCNode::create(); popup->setVisible(false); popup->setID("result-confirmation"_spr);
+        float const panelWidth = std::min(390.f, window.width - 24.f);
+        float const panelHeight = std::min(160.f, window.height - 24.f);
+        auto* panel = CCLayerColor::create(ccc4(8, 29, 56, 248));
+        panel->setContentSize({panelWidth, panelHeight});
+        panel->setPosition({(window.width - panelWidth) / 2.f, (window.height - panelHeight) / 2.f});
+        popup->addChild(panel);
+        auto popupLabel = [popup, window, panelWidth](std::string const& value, float y, float scale) {
+            auto* text = CCLabelBMFont::create(value.c_str(), "bigFont.fnt");
+            text->setPosition({window.width / 2.f, window.height / 2.f + y});
+            text->limitLabelWidth(panelWidth - 24.f, scale, .2f);
+            popup->addChild(text, 2);
+        };
+        popupLabel("MATCH RESULT", 56.f, .55f);
+        popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 27.f, .65f);
+        popupLabel(fmt::format("{}  {}%  :  {}%  {}", hostProfile.name, info.host.bestPercent,
+            info.guest.bestPercent, guestProfile.name), -2.f, .40f);
+        if (info.host.cheated || info.guest.cheated) {
+            popupLabel(fmt::format("CHEATING DETECTED: {}", info.host.cheated ? hostProfile.name : guestProfile.name),
+                -25.f, .4f);
+        }
+        auto* menu = CCMenu::create(); menu->setPosition({window.width / 2.f, window.height / 2.f - 51.f});
+        auto* button = ButtonSprite::create("Return to Room", "goldFont.fnt", "GJ_button_01.png");
+        button->setScale(.72f);
+        menu->addChild(CCMenuItemSpriteExtra::create(button, this, menu_selector(Session::onResultExit)));
+        popup->addChild(menu, 3);
+        root->addChild(popup, 50); resultPopup = popup;
         // PauseLayer and native end screens are siblings of PlayLayer. Put the
         // result above them in the scene so it remains visible for both seats.
         if (auto* scene = owner->getParent()) scene->addChild(root, 100010);
         else owner->addChild(root, 100010);
+        resultRoot = root;
         resultVisible = true;
+    }
+    float resultElapsed() const {
+        return std::chrono::duration<float>(Clock::now() - resultBegan).count();
+    }
+    void updateResultVisual(float elapsed) {
+        if (!resultVisible) return;
+        auto progress = std::clamp(elapsed / RESULT_PROGRESS_TIME, 0.f, 1.f);
+        progress = progress * progress * (3.f - 2.f * progress);
+        int const hostValue = static_cast<int>(std::round(finalResult.host.bestPercent * progress));
+        int const guestValue = static_cast<int>(std::round(finalResult.guest.bestPercent * progress));
+        auto setPercent = [](WeakRef<CCLabelBMFont> const& ref, int value) {
+            if (auto item = ref.lock()) {
+                auto display = fmt::format("{}%", value);
+                if (display != item->getString()) {
+                    item->setString(display.c_str());
+                    item->limitLabelWidth(140.f, .5f, .2f);
+                }
+            }
+        };
+        setPercent(hostPercent, hostValue);
+        setPercent(guestPercent, guestValue);
+        if (auto bar = hostGauge.lock()) bar->setContentSize({145.f * hostValue / 100.f, 7.f});
+        if (auto bar = guestGauge.lock()) bar->setContentSize({145.f * guestValue / 100.f, 7.f});
+        if (elapsed < RESULT_PROGRESS_TIME) return;
+        if (!winnerRevealed) {
+            winnerRevealed = true;
+            if (auto title = winnerTitle.lock()) {
+                title->setVisible(true);
+                title->setScale(title->getScale() * .55f);
+                title->runAction(CCEaseBackOut::create(CCScaleBy::create(.8f, 1.f / .55f)));
+            }
+            if (auto subtitle = resultSubtitle.lock()) subtitle->setVisible(true);
+            if (auto root = resultRoot.lock()) {
+                auto window = CCDirector::sharedDirector()->getWinSize();
+                for (float offset : {-90.f, 90.f}) {
+                    auto* burst = CCParticleExplosion::create();
+                    burst->setTotalParticles(90);
+                    burst->setPosition({window.width / 2.f + offset, window.height / 2.f + 35.f});
+                    root->addChild(burst, 15);
+                }
+            }
+        }
+        if (elapsed < RESULT_PROGRESS_TIME + RESULT_WINNER_TIME) {
+            label(returnStatus, finalResult.draw ? "DRAW" : "WINNER DECIDED!");
+            return;
+        }
+        if (elapsed < RESULT_CONFIRM_START) {
+            label(returnStatus, finalResult.draw ? "Finalizing result..." : "Finishing move...");
+            return;
+        }
+        if (!confirmationVisible) {
+            confirmationVisible = true;
+            if (auto popup = resultPopup.lock()) popup->setVisible(true);
+        }
+        auto seconds = std::max(0, static_cast<int>(std::ceil(
+            RESULT_CONFIRM_START + RESULT_CONFIRM_TIME - elapsed)));
+        label(returnStatus, fmt::format("Returning to the room in {}...", seconds));
     }
     void exitAfterResult() {
         if (!active || forcingQuit || returning) return;
@@ -418,13 +615,10 @@ public:
         auto owner = play.lock(); if (!owner) { active = false; return; }
         returnRetry -= dt;
         if (finished || leaving) {
-            auto elapsed = Clock::now() - resultBegan;
-            if (finished && resultVisible && elapsed < RESULT_DISPLAY_TIME) {
-                auto left = std::chrono::ceil<std::chrono::seconds>(RESULT_DISPLAY_TIME - elapsed).count();
-                label(returnStatus, fmt::format("Returning to the room in {}...", left));
-                return;
-            }
-            if (elapsed >= (resultVisible ? RESULT_DISPLAY_TIME : std::chrono::seconds(3)) && returnRetry <= 0.f)
+            auto elapsed = resultElapsed();
+            if (finished) updateResultVisual(elapsed);
+            float const exitTime = resultVisible ? RESULT_CONFIRM_START + RESULT_CONFIRM_TIME : 3.f;
+            if (elapsed >= exitTime && returnRetry <= 0.f)
                 exitAfterResult();
             return;
         }
@@ -483,7 +677,9 @@ public:
                 auto const& name = firstUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
                 label(status, fmt::format("{} goes first\nStarting in {}", name, (revealUntil - now + 999) / 1000));
             }
-            else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError : timedOut ? "Pause limit reached. Waiting for result..." : local.paused ? "Paused - 30s maximum" :
+            else if (!finished && !leaving) label(status, reportFailures >= 3 ? "Retrying match sync... " + reportError :
+                local.cheated ? "CHEATING DETECTED - match lost" : other.cheated ? "Opponent cheating detected" :
+                timedOut ? "Pause limit reached. Waiting for result..." : local.paused ? "Paused - 30s maximum" :
                 other.paused ? "Opponent paused" : spectating && terminal(other, rules) ? "Confirming match result..." : "");
         }
     }
@@ -496,6 +692,9 @@ bool blocksInput(GJBaseGameLayer* layer) { return blocksGameplay(layer); }
 bool blocksPause(GJBaseGameLayer* layer) { auto& s = Session::get(); return s.owns(layer) && (s.finished || s.leaving); }
 void sample(PlayLayer* layer) { Session::get().sampleState(layer); }
 void died(PlayLayer* layer) { Session::get().death(layer); }
+void survivedLethalHit(PlayLayer* layer, PlayerObject* player, GameObject* hazard) {
+    Session::get().survivedLethalHit(layer, player, hazard);
+}
 void completed(PlayLayer* layer) { Session::get().clear(layer); }
 bool beforeReset(PlayLayer* layer) { return Session::get().resetBefore(layer); }
 void afterReset(PlayLayer* layer) { Session::get().resetAfter(layer); }
