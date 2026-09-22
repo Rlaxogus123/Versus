@@ -6,6 +6,7 @@
 #include "VersusService.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
+#include <Geode/binding/GameObject.hpp>
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PauseLayer.hpp>
 #include <Geode/binding/PlayerObject.hpp>
@@ -48,10 +49,10 @@ public:
     bool quitDialog = false, warnedPause = false, leaving = false, timedOut = false;
     bool finished = false, spectating = false, returning = false, resultVisible = false;
     bool winnerRevealed = false, confirmationVisible = false;
-    bool previousAirborne = false, motionSampled = false;
-    int airJumpImpulses = 0, speedAnomalyFrames = 0;
-    double previousYVelocity = 0., jumpDirection = 0.;
-    Clock::time_point previousMotionSample;
+    GameObject* firstSurvivedHazard = nullptr;
+    PlayerObject* firstSurvivedPlayer = nullptr;
+    float firstSurvivedX = 0.f;
+    Clock::time_point attemptBegan, firstSurvivedAt;
     int runBest = 0, lastRecordedRun = 0;
     int reportFailures = 0;
     std::string reportError;
@@ -158,9 +159,8 @@ public:
         hostPercent = nullptr; guestPercent = nullptr;
         hostGauge = nullptr; guestGauge = nullptr;
         resultPopup = nullptr; resultRoot = nullptr;
-        previousAirborne = false; motionSampled = false;
-        airJumpImpulses = 0; speedAnomalyFrames = 0;
-        previousYVelocity = 0.; jumpDirection = 0.;
+        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
+        attemptBegan = Clock::now();
         returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
@@ -196,48 +196,14 @@ public:
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
         report(true);
     }
-    void inspectMotion(PlayLayer* layer) {
-        if (layer->m_isTestMode) { flagCheat("TEST MODE"); return; }
-        if (layer->m_isPracticeMode != rules.practice) { flagCheat("PRACTICE OVERRIDE"); return; }
-        float const timeScale = CCDirector::sharedDirector()->getScheduler()->getTimeScale();
-        speedAnomalyFrames = timeScale > 1.05f || (timeScale > 0.f && timeScale < .95f)
-            ? speedAnomalyFrames + 1 : 0;
-        if (speedAnomalyFrames >= 6) { flagCheat("SPEED HACK"); return; }
-
-        auto* player = layer->m_player1;
-        if (!player || player->m_isShip || player->m_isBird || player->m_isBall ||
-            player->m_isDart || player->m_isRobot || player->m_isSpider ||
-            player->m_isSwing || player->m_isDashing) {
-            motionSampled = false; airJumpImpulses = 0; return;
-        }
-        auto const now = Clock::now();
-        bool const airborne = !player->m_isOnGround;
-        double const velocity = player->m_yVelocity;
-        if (motionSampled) {
-            auto const gap = std::chrono::duration<float>(now - previousMotionSample).count();
-            if (gap < .004f) return; // Other hooks can sample the same frame.
-            if (gap > .12f) { motionSampled = false; airJumpImpulses = 0; }
-        }
-        if (motionSampled && airborne && !previousAirborne && std::abs(velocity) > 5.) {
-            jumpDirection = velocity > 0. ? 1. : -1.;
-            airJumpImpulses = 0;
-        }
-        if (motionSampled && airborne && previousAirborne && jumpDirection != 0. &&
-            !player->m_touchedRing && !player->m_ringJumpRelated &&
-            velocity * jumpDirection > 8. &&
-            (velocity - previousYVelocity) * jumpDirection > 8.) {
-            if (++airJumpImpulses >= 3) { flagCheat("JUMP HACK"); return; }
-        }
-        if (!airborne) { airJumpImpulses = 0; jumpDirection = 0.; }
-        previousAirborne = airborne;
-        previousYVelocity = velocity;
-        previousMotionSample = now;
-        motionSampled = true;
-    }
     void sampleState(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || blocked() || local.paused || !local.inAttempt) return;
-        inspectMotion(layer);
-        if (local.cheated) return;
+        // Mode changes and scheduler speed are not proof of cheating. Ignore
+        // progress until the expected mode returns, without penalizing anyone.
+        if (layer->m_isTestMode || layer->m_isPracticeMode != rules.practice) {
+            firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
+            return;
+        }
         if ((layer->m_player1 && layer->m_player1->m_isDead) ||
             (layer->m_gameState.m_isDualMode && layer->m_player2 && layer->m_player2->m_isDead)) {
             death(layer); return;
@@ -261,6 +227,7 @@ public:
     }
     void death(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || !local.inAttempt || blocked()) return;
+        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
         if (!finishAttempt(local, rules, percent(layer))) return;
         runBest = std::max(runBest, local.currentPercent); saveAttempt();
         dirty = true; reportTimer = 0.f;
@@ -285,11 +252,14 @@ public:
     }
     void resetAfter(PlayLayer* layer) {
         if (!owns(layer) || releasing || done()) return;
+        firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr;
+        attemptBegan = Clock::now();
         local.currentPercent = 0; local.inAttempt = true; local.spectating = false; spectating = false;
         ++local.runNumber; runBest = 0; dirty = true; reportTimer = 0.f;
     }
     void pause(PlayLayer* layer, bool value) {
         if (!owns(layer) || finished || local.paused == value) return;
+        if (value) { firstSurvivedHazard = nullptr; firstSurvivedPlayer = nullptr; }
         local.paused = value; local.pausedAt = value ? Service::get().serverNow() : 0;
         warnedPause = false; dirty = true; reportTimer = 0.f;
     }
@@ -357,9 +327,33 @@ public:
         if (owner->m_isPaused) owner->resume();
     }
     void survivedLethalHit(PlayLayer* layer, PlayerObject* player, GameObject* hazard) {
-        if (owns(layer) && player && hazard && !player->m_isDead && local.inAttempt &&
-            !blocked() && !local.paused && Service::get().serverNow() >= revealUntil)
+        if (!owns(layer) || !player || !hazard || player->m_isDead || !local.inAttempt ||
+            blocked() || local.paused || layer->m_isPaused || layer->m_isTestMode ||
+            layer->m_isPracticeMode || rules.practice || player->m_isBeingSpawnedByDualPortal ||
+            player->m_isDashing ||
+            player->m_isLocked || hazard->m_isDisabled || hazard->m_isNoTouch ||
+            hazard->m_isPassable || (hazard->m_objectType != GameObjectType::Hazard &&
+            hazard->m_objectType != GameObjectType::AnimatedHazard)) return;
+        auto const now = Clock::now();
+        if (now - attemptBegan < std::chrono::seconds(1)) return;
+        auto const x = player->getPositionX();
+        // One destroyPlayer call can be suppressed by normal gameplay state.
+        // Require a separate lethal hazard, later in the same continuous run.
+        if (firstSurvivedHazard && firstSurvivedPlayer == player &&
+            firstSurvivedHazard != hazard &&
+            now - firstSurvivedAt >= std::chrono::milliseconds(350) &&
+            now - firstSurvivedAt <= std::chrono::seconds(8) &&
+            std::abs(x - firstSurvivedX) >= 25.f) {
             flagCheat("NOCLIP");
+            return;
+        }
+        if (!firstSurvivedHazard || firstSurvivedPlayer != player ||
+            now - firstSurvivedAt > std::chrono::seconds(8)) {
+            firstSurvivedHazard = hazard;
+            firstSurvivedPlayer = player;
+            firstSurvivedX = x;
+            firstSurvivedAt = now;
+        }
     }
     void onResultExit(CCObject*) {
         if (finished && confirmationVisible) exitAfterResult();
@@ -376,6 +370,7 @@ public:
         auto owner = play.lock(); if (!owner) return;
         dismissPause(owner.data());
 #if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+        PlatformToolbox::toggleLockCursor(false);
         PlatformToolbox::showCursor();
 #endif
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);

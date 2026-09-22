@@ -380,6 +380,10 @@ public:
             CCDirector::sharedDirector()->replaceScene(versus::lobbyScene(message));
             message.clear();
         }
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+        PlatformToolbox::toggleLockCursor(false);
+        PlatformToolbox::showCursor();
+#endif
         if (!message.empty()) Loader::get()->queueInMainThread([message] {
             FLAlertLayer::create("Versus", message, "OK")->show();
         });
@@ -538,8 +542,15 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
     void onQuit() {
         if (versus::battle::requestQuit(this)) return;
         auto& controller = LaunchController::get();
-        if (controller.belongs(this)) controller.prepareQuit();
+        bool const versusMatch = controller.belongs(this);
+        if (versusMatch) controller.prepareQuit();
         PlayLayer::onQuit();
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+        if (versusMatch) {
+            PlatformToolbox::toggleLockCursor(false);
+            PlatformToolbox::showCursor();
+        }
+#endif
     }
 };
 

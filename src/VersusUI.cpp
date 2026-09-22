@@ -268,6 +268,10 @@ public:
     void keyBackClicked() override { goBack(); }
     void onEnter() override {
         CCLayer::onEnter();
+#if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
+        PlatformToolbox::toggleLockCursor(false);
+        PlatformToolbox::showCursor();
+#endif
         scheduleUpdate();
     }
     void onExit() override {
