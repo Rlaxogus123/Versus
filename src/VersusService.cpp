@@ -453,6 +453,15 @@ using Mutator = std::function<std::string(Json&)>;
 // that read without issuing a write that would clear the new ready state.
 constexpr char const* ROOM_UNCHANGED = "\x1froom-unchanged";
 void mutateRoom(std::string id, uint64_t epoch, Mutator change, Done callback, int attempts = 3) {
+    if (!Service::get().connected()) {
+        Service::get().connect([id = std::move(id), epoch, change = std::move(change),
+                                callback = std::move(callback), attempts](bool ok, std::string error) mutable {
+            if (epoch != state().epoch) { callback(false, "Room session changed."); return; }
+            if (!ok) { callback(false, std::move(error)); return; }
+            mutateRoom(std::move(id), epoch, std::move(change), std::move(callback), attempts);
+        });
+        return;
+    }
     ++state().revision;
     request("GET", "rooms/" + id, {},
         [id, epoch, change = std::move(change), callback = std::move(callback), attempts](web::WebResponse response) mutable {

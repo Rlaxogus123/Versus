@@ -1,3 +1,7 @@
+# v0.4.10
+
+- Refresh expired Firebase authentication before changing a room, including rule edits and room departure.
+
 # v0.4.9
 
 - Fix match start and ordinary progress against servers still using the previous Firebase rules by omitting the optional false cheat flag.
