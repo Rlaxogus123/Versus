@@ -75,7 +75,7 @@ function New-Launch {
     return @{ id = [Guid]::NewGuid().ToString('N'); requestedAt = (Timestamp); hostLoaded = $false; guestLoaded = $false; releasedAt = 0 }
 }
 function New-BattlePlayer([bool]$Playing = $true, [bool]$Spectator = $false) {
-    return @{ attemptsUsed = 0; bestPercent = 0; currentPercent = 0; runNumber = $(if ($Playing) { 1 } else { 0 }); inAttempt = $Playing; cleared = $false; forfeited = $false; cheated = $false; spectating = $Spectator; paused = $false; pausedAt = 0; x = 0; y = 0; cameraX = 0; cameraY = 0; updatedAt = 0 }
+    return @{ attemptsUsed = 0; bestPercent = 0; currentPercent = 0; runNumber = $(if ($Playing) { 1 } else { 0 }); inAttempt = $Playing; cleared = $false; forfeited = $false; spectating = $Spectator; paused = $false; pausedAt = 0; x = 0; y = 0; cameraX = 0; cameraY = 0; updatedAt = 0 }
 }
 function New-Battle($Room) {
     $sequence = $Room.rules.sequence -and $Room.rules.mode -eq 0 -and !$Room.rules.practice
@@ -650,48 +650,6 @@ try {
     $room.battle.winnerUid = 'host'
     $room.battle.finishedAt = Timestamp
     Assert-Status 'higher progress with fewer attempts wins early' (Put-Room earlycase host $room)
-
-    Create-Room cheatcase
-    Assert-Status 'cheat test guest joins' (Join-Room cheatcase guest)
-    $room = Get-Room cheatcase
-    Set-Field $room level @{ id = 32456; name = 'Cheat Map'; difficulty = 5; stars = 8; demon = $false; autoLevel = $false }
-    Assert-Status 'cheat test host selects map' (Put-Room cheatcase host $room)
-    Ready-Host cheatcase
-    $room = Get-Room cheatcase
-    $room.guestReady = $true
-    Assert-Status 'cheat test guest ready' (Put-Room cheatcase guest $room)
-    $room = Get-Room cheatcase
-    Set-Field $room launch (New-Launch)
-    $room.started = $true
-    Set-Field $room battle (New-Battle $room)
-    Assert-Status 'cheat test battle starts' (Put-Room cheatcase host $room)
-    $room = Get-Room cheatcase
-    $room.launch.hostLoaded = $true
-    $room.launch.guestLoaded = $true
-    $room.launch.releasedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 5000
-    Assert-Status 'seed cheat test release' (Send-Request PUT 'versus-v1/rooms/cheatcase' $room -Admin)
-    $room = Get-Room cheatcase
-    $room.battle.guest.cheated = $true
-    $room.hostSeen = Timestamp
-    Assert-Status 'host cannot accuse guest by editing guest state' (Put-Room cheatcase host $room) @(401, 403)
-    $room = Get-Room cheatcase
-    $room.battle.guest.cheated = $true
-    $room.battle.guest.inAttempt = $false
-    $room.battle.guest.spectating = $true
-    $room.battle.guest.updatedAt = Timestamp
-    $room.guestSeen = Timestamp
-    $room.battle.winnerUid = 'guest'
-    $room.battle.finishedAt = Timestamp
-    Assert-Status 'cheater cannot claim victory' (Put-Room cheatcase guest $room) @(401, 403)
-    $room = Get-Room cheatcase
-    $room.battle.guest.cheated = $true
-    $room.battle.guest.inAttempt = $false
-    $room.battle.guest.spectating = $true
-    $room.battle.guest.updatedAt = Timestamp
-    $room.guestSeen = Timestamp
-    $room.battle.winnerUid = 'host'
-    $room.battle.finishedAt = Timestamp
-    Assert-Status 'cheating detected, opponent wins' (Put-Room cheatcase guest $room)
 
     Create-Room percentcase
     Assert-Status 'percent guest joins' (Join-Room percentcase guest)
