@@ -92,13 +92,6 @@ CCNode* panel(CCNode* parent, CCPoint position, CCSize size, bool decorated = tr
         bg->setOpacity(170);
     }
     node->addChild(bg, -3);
-    auto* wash = CCLayerGradient::create(
-        decorated ? ccc4(46, 127, 198, 48) : ccc4(41, 134, 202, 48),
-        ccc4(3, 20, 58, decorated ? 34 : 70),
-        {0.f, -1.f});
-    wash->setContentSize({std::max(1.f, size.width - 14.f), std::max(1.f, size.height - 14.f)});
-    wash->setPosition({7.f, 7.f});
-    node->addChild(wash, -2);
     auto* edge = CCDrawNode::create();
     edge->drawSegment({10.f, size.height - 7.f}, {size.width - 10.f, size.height - 7.f},
         .55f, {.64f, .9f, 1.f, .62f});
@@ -355,10 +348,6 @@ protected:
         headerBG->setColor(ccc3(7, 42, 105));
         headerBG->setOpacity(235);
         m_header->addChild(headerBG, -2);
-        auto* headerGlow = CCLayerGradient::create(ccc4(65, 187, 255, 85), ccc4(10, 44, 108, 5), {0.f, -1.f});
-        headerGlow->setContentSize({headerWidth - 10.f, 30.f});
-        headerGlow->setPosition({5.f, 7.f});
-        m_header->addChild(headerGlow, -1);
         auto* trim = CCDrawNode::create();
         trim->drawSegment({13.f, 5.f}, {headerWidth - 13.f, 5.f}, .65f, {.35f, .82f, 1.f, .85f});
         m_header->addChild(trim);
@@ -1022,12 +1011,6 @@ class LobbyLayer : public SceneLayer {
             bg->setOpacity(245);
             bg->setPosition(rowSprite->getContentSize() / 2.f);
             rowSprite->addChild(bg, -1);
-            auto* gradient = CCLayerGradient::create(
-                row % 2 ? ccc4(25, 109, 170, 220) : ccc4(17, 81, 151, 220),
-                ccc4(10, 31, 70, 170), {1.f, -.3f});
-            gradient->setContentSize({rowWidth - 8.f, rowHeight - 6.f});
-            gradient->setPosition({4.f, 3.f});
-            rowSprite->addChild(gradient, -1);
             auto* trim = CCDrawNode::create();
             trim->drawSegment({5.f, 7.f}, {5.f, rowHeight - 7.f}, 1.4f,
                 {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .95f});
@@ -1212,6 +1195,9 @@ class RoomLayer : public SceneLayer {
     std::string m_seenEmote;
     std::string m_signature;
     std::string m_returnedBattle;
+    std::string m_readyRoomID;
+    bool m_opponentReadyKnown = false;
+    bool m_lastOpponentReady = false;
 
     void requestRender() {
         if (m_renderQueued || m_transitioning) return;
@@ -1357,6 +1343,18 @@ class RoomLayer : public SceneLayer {
         auto const& current = Service::get().room();
         if (!current) return;
         auto const room = *current;
+        bool const host = Service::get().isHost();
+        bool const opponentPresent = host ? room.guest.has_value() : true;
+        bool const currentOpponentReady = host ? room.guestReady : room.hostReady;
+        if (m_readyRoomID != room.id) {
+            m_readyRoomID = room.id;
+            m_opponentReadyKnown = true;
+            m_lastOpponentReady = currentOpponentReady;
+        } else if (m_opponentReadyKnown) {
+            if (opponentPresent && !m_lastOpponentReady && currentOpponentReady && !room.started)
+                audio::play(audio::Cue::ReadyLock);
+            m_lastOpponentReady = currentOpponentReady;
+        }
         if (m_mapID != room.level.id) {
             ++m_downloadGeneration;
             m_mapID = room.level.id;
@@ -1382,14 +1380,13 @@ class RoomLayer : public SceneLayer {
             lock->setPosition({18.f, height - 18.f});
             frame->addChild(lock);
         }
-        bool const host = Service::get().isHost();
         float const cardWidth = width * .245f;
         float const cardHeight = height - 93.f;
         std::optional<PlayerProfile> mine = host ? std::optional<PlayerProfile>(room.host) : room.guest;
         std::optional<PlayerProfile> opponent = host ? room.guest : std::optional<PlayerProfile>(room.host);
         if (!mine) mine = Service::get().profile();
         bool const myReady = host ? room.hostReady : room.guestReady;
-        bool const opponentReady = host ? room.guestReady : room.hostReady;
+        bool const opponentReady = currentOpponentReady;
         playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, true, host, myReady);
         bool const opponentChecking = room.battle && room.battle->finishedAt > 0 &&
             (host ? !room.battle->guestReturned : !room.battle->hostReturned);

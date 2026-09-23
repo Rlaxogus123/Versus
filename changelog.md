@@ -1,3 +1,10 @@
+# v0.4.14
+
+- Remove square color-gradient overlays from rounded panels while keeping the existing layout.
+- Animate result percentages with frame-rate-independent exponential interpolation.
+- Separate winner and execution phases, then add faster attacks, impact flashes, particles, camera zoom, tilt, and shake.
+- Play the ready cue when either the local player or the opponent becomes ready.
+
 # v0.4.13
 
 - Refresh the lobby, room, battle HUD, synchronized start, result panel, and Creator Layer badge with native Geometry Dash framing and cleaner spacing.

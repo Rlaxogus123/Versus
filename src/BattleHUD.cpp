@@ -69,12 +69,6 @@ struct Card {
         background->setColor(mirrored ? ccc3(39, 24, 70) : ccc3(6, 40, 78));
         background->setOpacity(240);
         root->addChild(background, -2);
-        auto* wash = CCLayerGradient::create(
-            mirrored ? ccc4(170, 66, 153, 58) : ccc4(44, 168, 225, 62),
-            ccc4(4, 12, 35, 25), {mirrored ? -1.f : 1.f, -.2f});
-        wash->setContentSize({width - 8.f, height - 7.f});
-        wash->setPosition({4.f, 3.f});
-        root->addChild(wash, -1);
         auto* border = CCDrawNode::create();
         CCPoint outline[] = {{1.f, 1.f}, {width - 1.f, 1.f},
             {width - 1.f, height - 1.f}, {1.f, height - 1.f}};

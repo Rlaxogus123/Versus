@@ -66,6 +66,8 @@ public:
     WeakRef<CCNodeRGBA> progressSection, winnerSection, actorSection, resultPopup;
     WeakRef<CCNode> resultRoot;
     float resultTimerWidth = 0.f;
+    float displayedHostPercent = 0.f;
+    float displayedGuestPercent = 0.f;
 
     static Session& get() {
         static auto* session = [] {
@@ -158,6 +160,7 @@ public:
         hostPercent = nullptr; guestPercent = nullptr;
         hostGauge = nullptr; guestGauge = nullptr;
         resultPopup = nullptr; resultRoot = nullptr;
+        displayedHostPercent = 0.f; displayedGuestPercent = 0.f;
         returnRetry = 0.f; runBest = 0; lastRecordedRun = 0; runner = nullptr;
         reportFailures = 0; reportError.clear();
         host = Service::get().isHost(); uid = Service::get().profile().uid;
@@ -395,6 +398,10 @@ public:
             }
         }
         auto* a = icon(hostProfile, 1.8f); auto* b = icon(guestProfile, 1.8f); b->setFlipX(true);
+        actors->setContentSize(window);
+        actors->setAnchorPoint({.5f, .5f});
+        actors->setPosition(window / 2.f);
+        actors->setVisible(false);
         a->setPosition({window.width / 2.f - 95.f, window.height / 2.f - 10.f});
         b->setPosition({window.width / 2.f + 95.f, window.height / 2.f - 10.f});
         actors->addChild(a); actors->addChild(b);
@@ -405,39 +412,126 @@ public:
             unsigned variant = 0;
             for (unsigned char value : battleID) variant = variant * 33u + value;
             variant %= 3u;
-            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + 1.f;
-            if (variant == 0) {
-                // Dash-punch.
-                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart),
-                    CCEaseBackIn::create(CCMoveBy::create(.55f, {direction * 145.f, 0.f})),
-                    CCMoveBy::create(.75f, {-direction * 45.f, 0.f}), nullptr));
+            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + .55f;
+            float impactDelay = executionStart + .48f;
+
+            auto* streaks = CCDrawNode::create();
+            for (int i = -4; i <= 4; ++i) {
+                float const y = window.height / 2.f + i * 18.f;
+                float const start = direction > 0.f ? 22.f : window.width - 22.f;
+                float const end = start + direction * (75.f + (i & 1 ? 34.f : 0.f));
+                streaks->drawSegment({start, y}, {end, y + direction * 4.f},
+                    .8f, {.62f, .9f, 1.f, .62f});
             }
-            else {
-                // Fireball or spike volley, selected consistently for both clients.
+            streaks->setOpacity(0);
+            actors->addChild(streaks, -1);
+            streaks->runAction(CCSequence::create(
+                CCDelayTime::create(executionStart - .18f),
+                CCFadeTo::create(.10f, 180),
+                CCDelayTime::create(.62f),
+                CCFadeOut::create(.24f), nullptr));
+
+            if (variant == 0) {
+                // Wind-up, explosive dash, then a short recoil.
+                impactDelay = executionStart + .32f;
+                winner->runAction(CCSequence::create(
+                    CCDelayTime::create(executionStart - .24f),
+                    CCSpawn::create(
+                        CCEaseSineOut::create(CCMoveBy::create(.24f, {-direction * 24.f, -5.f})),
+                        CCEaseSineOut::create(CCRotateTo::create(.24f, -direction * 16.f)), nullptr),
+                    CCEaseBackIn::create(CCMoveBy::create(.32f, {direction * 178.f, 10.f})),
+                    CCSpawn::create(
+                        CCEaseSineOut::create(CCMoveBy::create(.52f, {-direction * 42.f, -10.f})),
+                        CCEaseSineOut::create(CCRotateTo::create(.52f, 0.f)), nullptr), nullptr));
+            }
+            else if (variant == 1) {
+                // Fast fireball with recoil.
                 auto* shot = CCDrawNode::create();
-                if (variant == 1) {
-                    shot->drawDot({0.f, 0.f}, 10.f, {1.f, .28f, .08f, 1.f});
-                    shot->drawDot({0.f, 0.f}, 5.f, {1.f, .92f, .28f, 1.f});
-                }
-                else {
-                    CCPoint spike[] = {{direction * 15.f, 0.f}, {-direction * 10.f, 9.f}, {-direction * 7.f, 0.f}, {-direction * 10.f, -9.f}};
-                    shot->drawPolygon(spike, 4, {.65f, .9f, 1.f, 1.f}, 1.5f, {1.f, 1.f, 1.f, 1.f});
-                }
+                shot->drawDot({0.f, 0.f}, 12.f, {1.f, .22f, .06f, .92f});
+                shot->drawDot({0.f, 0.f}, 6.f, {1.f, .94f, .34f, 1.f});
                 shot->setPosition(winner->getPosition());
                 shot->setScale(.2f);
                 actors->addChild(shot, 4);
+                impactDelay = executionStart + .48f;
                 shot->runAction(CCSequence::create(CCDelayTime::create(executionStart),
-                    CCSpawn::create(CCMoveBy::create(.9f, {direction * 190.f, 0.f}),
-                        CCEaseBackOut::create(CCScaleTo::create(.6f, 1.f)), nullptr),
+                    CCSpawn::create(
+                        CCEaseSineIn::create(CCMoveBy::create(.48f, {direction * 190.f, 0.f})),
+                        CCEaseBackOut::create(CCScaleTo::create(.30f, 1.25f)),
+                        CCRotateBy::create(.48f, direction * 270.f), nullptr),
                     CCRemoveSelf::create(), nullptr));
-                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart),
-                    CCRotateBy::create(.4f, -direction * 18.f),
-                    CCRotateBy::create(.6f, direction * 18.f), nullptr));
+                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart - .28f),
+                    CCSpawn::create(CCRotateTo::create(.28f, -direction * 22.f),
+                        CCMoveBy::create(.28f, {-direction * 18.f, 0.f}), nullptr),
+                    CCSpawn::create(CCRotateTo::create(.42f, direction * 8.f),
+                        CCMoveBy::create(.42f, {direction * 15.f, 0.f}), nullptr),
+                    CCEaseSineOut::create(CCRotateTo::create(.38f, 0.f)), nullptr));
             }
-            float const impactDelay = executionStart + (variant == 0 ? .55f : .9f);
+            else {
+                // Three staggered energy spikes cross the frame.
+                impactDelay = executionStart + .58f;
+                for (int i = -1; i <= 1; ++i) {
+                    auto* shot = CCDrawNode::create();
+                    CCPoint spike[] = {{direction * 17.f, 0.f}, {-direction * 11.f, 9.f},
+                        {-direction * 7.f, 0.f}, {-direction * 11.f, -9.f}};
+                    shot->drawPolygon(spike, 4, {.56f, .88f, 1.f, 1.f}, 1.4f, {1.f, 1.f, 1.f, 1.f});
+                    shot->setPosition(winner->getPosition() + CCPoint{0.f, i * 16.f});
+                    shot->setScale(.35f);
+                    actors->addChild(shot, 4);
+                    shot->runAction(CCSequence::create(
+                        CCDelayTime::create(executionStart + (i + 1) * .07f),
+                        CCSpawn::create(
+                            CCEaseSineIn::create(CCMoveBy::create(.44f, {direction * 190.f, 0.f})),
+                            CCEaseBackOut::create(CCScaleTo::create(.25f, 1.f)), nullptr),
+                        CCRemoveSelf::create(), nullptr));
+                }
+                winner->runAction(CCSequence::create(CCDelayTime::create(executionStart - .30f),
+                    CCSpawn::create(CCJumpBy::create(.58f, {direction * 34.f, 0.f}, 30.f, 1),
+                        CCRotateBy::create(.58f, -direction * 360.f), nullptr),
+                    CCEaseSineOut::create(CCRotateTo::create(.25f, 0.f)), nullptr));
+            }
+
             loser->runAction(CCSequence::create(CCDelayTime::create(impactDelay), CCSpawn::create(
-                CCRotateBy::create(1.3f, direction * 360.f), CCMoveBy::create(1.3f, {direction * 100.f, -70.f}),
-                CCScaleTo::create(1.3f, 0.f), nullptr), nullptr));
+                CCEaseSineIn::create(CCRotateBy::create(1.05f, direction * 540.f)),
+                CCEaseSineIn::create(CCMoveBy::create(1.05f, {direction * 135.f, -85.f})),
+                CCEaseSineIn::create(CCScaleTo::create(1.05f, .08f)), nullptr), nullptr));
+
+            // Move and tilt the full actor layer as a camera rig.
+            actors->runAction(CCSequence::create(
+                CCDelayTime::create(executionStart - .25f),
+                CCSpawn::create(
+                    CCEaseSineOut::create(CCScaleTo::create(.25f, 1.12f)),
+                    CCEaseSineOut::create(CCRotateTo::create(.25f, direction * 2.2f)),
+                    CCEaseSineOut::create(CCMoveTo::create(.25f,
+                        window / 2.f + CCPoint{-direction * 11.f, 4.f})), nullptr),
+                CCDelayTime::create(std::max(0.f, impactDelay - executionStart)),
+                CCSpawn::create(CCScaleTo::create(.07f, 1.30f),
+                    CCRotateTo::create(.07f, -direction * 3.2f),
+                    CCMoveBy::create(.07f, {direction * 14.f, -5.f}), nullptr),
+                CCMoveBy::create(.045f, {-direction * 9.f, 5.f}),
+                CCMoveBy::create(.045f, {direction * 7.f, -4.f}),
+                CCSpawn::create(
+                    CCEaseSineOut::create(CCScaleTo::create(.58f, 1.06f)),
+                    CCEaseSineOut::create(CCRotateTo::create(.58f, 0.f)),
+                    CCEaseSineOut::create(CCMoveTo::create(.58f, window / 2.f)), nullptr), nullptr));
+
+            auto* flash = CCLayerColor::create(ccc4(255, 255, 255, 0));
+            root->addChild(flash, 28);
+            flash->runAction(CCSequence::create(
+                CCDelayTime::create(impactDelay),
+                CallFuncExt::create([] { audio::play(audio::Cue::ExecutionImpact); }),
+                CCFadeTo::create(.045f, 195),
+                CCFadeTo::create(.20f, 0), nullptr));
+            auto* impact = CCParticleExplosion::create();
+            impact->setTotalParticles(120);
+            impact->setPosition(loser->getPosition());
+            impact->setVisible(false);
+            actors->addChild(impact, 29);
+            impact->runAction(CCSequence::create(
+                CCDelayTime::create(impactDelay),
+                CallFuncExt::create([impact] {
+                    impact->setVisible(true);
+                    impact->resetSystem();
+                }), nullptr));
         }
         auto* popup = CCNodeRGBA::create();
         popup->setCascadeOpacityEnabled(true);
@@ -457,11 +551,6 @@ public:
         panel->setColor(ccc3(7, 42, 96));
         panel->setOpacity(250);
         popup->addChild(panel, -2);
-        auto* panelWash = CCLayerGradient::create(ccc4(67, 178, 244, 78), ccc4(4, 22, 58, 12), {0.f, -1.f});
-        panelWash->setContentSize({panelWidth - 14.f, panelHeight - 14.f});
-        panelWash->setPosition({(window.width - panelWidth) / 2.f + 7.f,
-            (window.height - panelHeight) / 2.f + 7.f});
-        popup->addChild(panelWash, -1);
         auto* panelTrim = CCDrawNode::create();
         panelTrim->drawSegment({window.width / 2.f - panelWidth / 2.f + 14.f, window.height / 2.f + 42.f},
             {window.width / 2.f + panelWidth / 2.f - 14.f, window.height / 2.f + 42.f},
@@ -503,7 +592,7 @@ public:
     float resultElapsed() const {
         return std::chrono::duration<float>(Clock::now() - resultBegan).count();
     }
-    void updateResultVisual(float elapsed) {
+    void updateResultVisual(float elapsed, float dt) {
         if (!resultVisible) return;
         float remaining = 0.f;
         if (elapsed < RESULT_PROGRESS_TIME)
@@ -516,10 +605,19 @@ public:
             remaining = 1.f - (elapsed - RESULT_CONFIRM_START) / RESULT_CONFIRM_TIME;
         if (auto bar = resultTimerFill.lock())
             bar->setContentSize({resultTimerWidth * std::clamp(remaining, 0.f, 1.f), 2.f});
-        auto progress = std::clamp(elapsed / RESULT_PROGRESS_TIME, 0.f, 1.f);
-        progress = progress * progress * (3.f - 2.f * progress);
-        int const hostValue = static_cast<int>(std::round(finalResult.host.bestPercent * progress));
-        int const guestValue = static_cast<int>(std::round(finalResult.guest.bestPercent * progress));
+        float const lerpAmount = std::clamp(dt * 8.f, 0.f, 1.f);
+        displayedHostPercent = std::lerp(displayedHostPercent,
+            static_cast<float>(finalResult.host.bestPercent), lerpAmount);
+        displayedGuestPercent = std::lerp(displayedGuestPercent,
+            static_cast<float>(finalResult.guest.bestPercent), lerpAmount);
+        if (elapsed >= RESULT_PROGRESS_TIME ||
+            std::abs(displayedHostPercent - finalResult.host.bestPercent) < .01f)
+            displayedHostPercent = static_cast<float>(finalResult.host.bestPercent);
+        if (elapsed >= RESULT_PROGRESS_TIME ||
+            std::abs(displayedGuestPercent - finalResult.guest.bestPercent) < .01f)
+            displayedGuestPercent = static_cast<float>(finalResult.guest.bestPercent);
+        int const hostValue = static_cast<int>(std::round(displayedHostPercent));
+        int const guestValue = static_cast<int>(std::round(displayedGuestPercent));
         auto setPercent = [](WeakRef<CCLabelBMFont> const& ref, int value) {
             if (auto item = ref.lock()) {
                 auto display = fmt::format("{}%", value);
@@ -531,13 +629,16 @@ public:
         };
         setPercent(hostPercent, hostValue);
         setPercent(guestPercent, guestValue);
-        if (auto bar = hostGauge.lock()) bar->setContentSize({145.f * hostValue / 100.f, 7.f});
-        if (auto bar = guestGauge.lock()) bar->setContentSize({145.f * guestValue / 100.f, 7.f});
+        if (auto bar = hostGauge.lock())
+            bar->setContentSize({145.f * displayedHostPercent / 100.f, 7.f});
+        if (auto bar = guestGauge.lock())
+            bar->setContentSize({145.f * displayedGuestPercent / 100.f, 7.f});
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
             audio::play(audio::Cue::WinnerReveal);
-            if (auto section = progressSection.lock()) section->runAction(CCFadeOut::create(.3f));
+            if (auto section = progressSection.lock()) section->runAction(CCSequence::create(
+                CCFadeOut::create(.3f), CCHide::create(), nullptr));
             if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 100));
             if (auto section = winnerSection.lock()) {
                 section->runAction(CCSequence::create(CCDelayTime::create(.3f),
@@ -560,13 +661,15 @@ public:
         if (elapsed < RESULT_CONFIRM_START) {
             if (!executionRevealed) {
                 executionRevealed = true;
-                if (!finalResult.draw)
-                    audio::play(audio::Cue::ExecutionImpact);
                 if (!finalResult.draw) {
-                    if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.3f));
-                    if (auto section = actorSection.lock())
-                        section->runAction(CCSequence::create(CCDelayTime::create(.3f),
-                            CCFadeIn::create(.55f), nullptr));
+                    if (auto section = winnerSection.lock()) section->runAction(CCSequence::create(
+                        CCFadeOut::create(.22f), CCHide::create(), nullptr));
+                    if (auto section = actorSection.lock()) {
+                        section->setVisible(true);
+                        section->setOpacity(0);
+                        section->runAction(CCSequence::create(CCDelayTime::create(.22f),
+                            CCFadeIn::create(.35f), nullptr));
+                    }
                 }
             }
             label(returnStatus, finalResult.draw ? "Finalizing result..." : "Finishing move...");
@@ -575,8 +678,10 @@ public:
         if (!confirmationVisible) {
             confirmationVisible = true;
             audio::play(audio::Cue::ResultReveal);
-            if (auto section = actorSection.lock()) section->runAction(CCFadeOut::create(.35f));
-            if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.35f));
+            if (auto section = actorSection.lock()) section->runAction(CCSequence::create(
+                CCFadeOut::create(.28f), CCHide::create(), nullptr));
+            if (auto section = winnerSection.lock()) section->runAction(CCSequence::create(
+                CCFadeOut::create(.28f), CCHide::create(), nullptr));
             if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.35f, 120));
             if (auto popup = resultPopup.lock()) {
                 popup->setVisible(true);
@@ -633,7 +738,7 @@ public:
         returnRetry -= dt;
         if (finished || leaving) {
             auto elapsed = resultElapsed();
-            if (finished) updateResultVisual(elapsed);
+            if (finished) updateResultVisual(elapsed, dt);
             float const exitTime = resultVisible ? RESULT_CONFIRM_START + RESULT_CONFIRM_TIME : 3.f;
             if (elapsed >= exitTime && returnRetry <= 0.f)
                 exitAfterResult();

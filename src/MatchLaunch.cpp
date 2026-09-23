@@ -170,10 +170,6 @@ public:
         panel->setOpacity(245);
         panel->setPosition(window / 2.f);
         root->addChild(panel, -2);
-        auto* wash = CCLayerGradient::create(ccc4(65, 182, 255, 72), ccc4(4, 22, 62, 15), {0.f, -1.f});
-        wash->setContentSize({334.f, 88.f});
-        wash->setPosition({window.width / 2.f - 167.f, window.height / 2.f - 42.f});
-        root->addChild(wash, -1);
         auto* title = CCLabelBMFont::create("VERSUS", "bigFont.fnt");
         title->setScale(.58f);
         title->setPosition({window.width / 2.f, window.height / 2.f + 31.f});
