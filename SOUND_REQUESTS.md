@@ -1,15 +1,25 @@
-# Custom sound requests
+# 전용 효과음 요청 목록
 
-Format: OGG Vorbis, 44.1 or 48 kHz, no clipping, little or no silence at the
-start. Short mono or stereo files are both suitable.
+아래 효과음 5개가 필요합니다. 준비된 파일은
+`Versus/resources/sounds/` 폴더에 넣어 주세요.
 
-| Filename | Length | Direction |
-| --- | ---: | --- |
-| `ui-open.ogg` | 0.12-0.25 s | Soft digital whoosh with a light click; clean, no long tail. |
-| `ready-lock.ogg` | 0.18-0.30 s | Positive lock-in snap; firm but not metallic or harsh. |
-| `winner-reveal.ogg` | 0.8-1.4 s | Short victory sting with a bright GD-style arcade finish. |
-| `execution-impact.ogg` | 0.25-0.50 s | Weighty impact with restrained low end; no distortion. |
-| `result-reveal.ogg` | 0.30-0.60 s | Clean glassy chime that resolves the result sequence. |
+파일 이름은 아래 표와 **완전히 같아야 합니다**.
 
-Place files in `resources/sounds/` using the exact names above. A new build is
-required after adding or replacing packaged files.
+| 파일 이름 | 사용 장면 | 권장 길이 | 원하는 느낌 |
+| --- | --- | ---: | --- |
+| `ui-open.ogg` | Versus 화면이 열릴 때 | 0.12~0.25초 | 부드러운 전자식 휙 소리와 가벼운 클릭. 잔향은 짧게. |
+| `ready-lock.ogg` | 플레이어가 준비 완료를 눌렀을 때 | 0.18~0.30초 | 준비가 확정되는 단단한 잠금 소리. 너무 날카로운 금속음은 제외. |
+| `winner-reveal.ogg` | 승자 닉네임과 `WIN!`이 나타날 때 | 0.8~1.4초 | 짧고 밝은 승리 팡파르. 지오메트리 대시의 아케이드 느낌. |
+| `execution-impact.ogg` | 처형 모션의 결정적인 타격 순간 | 0.25~0.50초 | 묵직하고 짧은 충격음. 저음은 적당히, 찢어지는 소리는 제외. |
+| `result-reveal.ogg` | 마지막 결과 확인 창이 나타날 때 | 0.30~0.60초 | 결과가 확정되는 맑은 유리·차임 계열 소리. |
+
+## 파일 형식
+
+- 형식: OGG Vorbis
+- 샘플 레이트: 44.1kHz 또는 48kHz
+- 모노·스테레오: 둘 다 가능
+- 시작 부분의 무음: 최대한 짧게
+- 음량: 소리가 깨지지 않게 조절
+
+파일이 없을 때는 지오메트리 대시 기본 효과음이 대신 재생됩니다.
+새 효과음 파일을 추가하거나 교체한 뒤에는 모드를 다시 빌드해야 합니다.
