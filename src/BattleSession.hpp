@@ -3,6 +3,7 @@ class PlayLayer;
 class GJBaseGameLayer;
 namespace versus::battle {
 void begin(PlayLayer* layer);
+void detach(PlayLayer* layer);
 bool activeFor(GJBaseGameLayer* layer);
 bool blocksGameplay(GJBaseGameLayer* layer);
 bool blocksInput(GJBaseGameLayer* layer);

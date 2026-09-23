@@ -107,8 +107,9 @@ public:
         return owner && static_cast<GJBaseGameLayer*>(owner.data()) == candidate;
     }
     bool belongs(PlayLayer* candidate) const {
+        if (!active() || !candidate) return false;
         auto owner = play.lock();
-        return active() && owner && owner.data() == candidate;
+        return owner && owner.data() == candidate;
     }
     bool currentLaunch() const {
         auto const& room = versus::Service::get().room();
@@ -325,6 +326,7 @@ public:
         level = nullptr;
     }
     void attach(PlayLayer* layer) {
+        play = nullptr;
         play = layer;
     }
     void entered(PlayLayer* layer) {
@@ -542,7 +544,10 @@ class $modify(VersusMatchPlayLayer, PlayLayer) {
         if (versus::battle::requestQuit(this)) return;
         auto& controller = LaunchController::get();
         bool const versusMatch = controller.belongs(this);
-        if (versusMatch) controller.prepareQuit();
+        if (versusMatch) {
+            controller.prepareQuit();
+            versus::battle::detach(this);
+        }
         PlayLayer::onQuit();
 #if defined(GEODE_IS_WINDOWS) || defined(GEODE_IS_MACOS)
         if (versusMatch) {

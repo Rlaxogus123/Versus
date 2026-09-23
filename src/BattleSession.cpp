@@ -18,7 +18,7 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr float RESULT_PROGRESS_TIME = 5.f;
+constexpr float RESULT_PROGRESS_TIME = 4.f;
 constexpr float RESULT_DECISION_TIME = 2.5f;
 constexpr float RESULT_SUMMARY_TIME = RESULT_PROGRESS_TIME + RESULT_DECISION_TIME;
 constexpr float RESULT_EXECUTION_TIME = 4.2f;
@@ -80,8 +80,9 @@ public:
         return *session;
     }
     bool owns(GJBaseGameLayer* layer) const {
+        if (!active || !layer) return false;
         auto owner = play.lock();
-        return active && owner && static_cast<GJBaseGameLayer*>(owner.data()) == layer;
+        return owner && static_cast<GJBaseGameLayer*>(owner.data()) == layer;
     }
     bool sameBattle() const {
         auto const& room = Service::get().room();
@@ -151,6 +152,11 @@ public:
         auto const& room = Service::get().room();
         if (!room || !room->battle || !room->guest) return;
         ++generation;
+        // Never swap a live Geode WeakRef from an old PlayLayer to a new one.
+        // Its controller releases the old layer while checking the new target,
+        // which can run other mods' teardown hooks during level construction.
+        play = nullptr;
+        play = layer;
         active = true; finished = false; leaving = false; timedOut = false; mainMenu = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; resultVisible = false;
@@ -169,7 +175,7 @@ public:
         hostProfile = room->host; guestProfile = *room->guest;
         local = host ? room->battle->host : room->battle->guest;
         other = host ? room->battle->guest : room->battle->host;
-        play = layer; reportTimer = 0.f; uiTimer = 0.f;
+        reportTimer = 0.f; uiTimer = 0.f;
         revealUntil = sequence() && room->launch ? room->launch->releasedAt + 8000 : 0;
         spectating = sequence() && room->battle->activeUid != uid;
         local.spectating = spectating;
@@ -205,6 +211,14 @@ public:
         if (local.runNumber <= lastRecordedRun || local.runNumber <= 0) return;
         Service::get().recordAttempt(local.runNumber, runBest);
         lastRecordedRun = local.runNumber;
+    }
+    void detachSession(PlayLayer* layer) {
+        if (!active || !layer) return;
+        auto owner = play.lock();
+        if (!owner || owner.data() != layer) return;
+        active = false;
+        reporting = false;
+        play = nullptr;
     }
     void death(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || !local.inAttempt || blocked()) return;
@@ -413,40 +427,10 @@ public:
             float direction = leftWins ? 1.f : -1.f;
             unsigned variant = 0;
             for (unsigned char value : battleID) variant = variant * 33u + value;
-            variant %= 3u;
+            variant %= 2u;
             float const executionStart = RESULT_SUMMARY_TIME + .55f;
             float impactDelay = executionStart + .48f;
-
-            auto* streaks = CCDrawNode::create();
-            for (int i = -4; i <= 4; ++i) {
-                float const y = window.height / 2.f + i * 18.f;
-                float const start = direction > 0.f ? 22.f : window.width - 22.f;
-                float const end = start + direction * (75.f + (i & 1 ? 34.f : 0.f));
-                streaks->drawSegment({start, y}, {end, y + direction * 4.f},
-                    .8f, {.62f, .9f, 1.f, .62f});
-            }
-            streaks->setOpacity(0);
-            actors->addChild(streaks, -1);
-            streaks->runAction(CCSequence::create(
-                CCDelayTime::create(executionStart - .18f),
-                CCFadeTo::create(.10f, 180),
-                CCDelayTime::create(.62f),
-                CCFadeOut::create(.24f), nullptr));
-
             if (variant == 0) {
-                // Wind-up, explosive dash, then a short recoil.
-                impactDelay = executionStart + .32f;
-                winner->runAction(CCSequence::create(
-                    CCDelayTime::create(executionStart - .24f),
-                    CCSpawn::create(
-                        CCEaseSineOut::create(CCMoveBy::create(.24f, {-direction * 24.f, -5.f})),
-                        CCEaseSineOut::create(CCRotateTo::create(.24f, -direction * 16.f)), nullptr),
-                    CCEaseBackIn::create(CCMoveBy::create(.32f, {direction * 178.f, 10.f})),
-                    CCSpawn::create(
-                        CCEaseSineOut::create(CCMoveBy::create(.52f, {-direction * 42.f, -10.f})),
-                        CCEaseSineOut::create(CCRotateTo::create(.52f, 0.f)), nullptr), nullptr));
-            }
-            else if (variant == 1) {
                 // Fast fireball with recoil.
                 auto* shot = CCDrawNode::create();
                 shot->drawDot({0.f, 0.f}, 12.f, {1.f, .22f, .06f, .92f});
@@ -649,12 +633,11 @@ public:
             if (auto banner = decisionBanner.lock()) banner->runAction(CCFadeIn::create(.55f));
             if (!finalResult.draw) if (auto result = resultRoot.lock()) {
                 auto window = CCDirector::sharedDirector()->getWinSize();
-                for (float offset : {-90.f, 90.f}) {
-                    auto* burst = CCParticleExplosion::create();
-                    burst->setTotalParticles(90);
-                    burst->setPosition({window.width / 2.f + offset, window.height / 2.f + 35.f});
-                    result->addChild(burst, 16);
-                }
+                float const winnerX = finalResult.winnerUid == hostProfile.uid ? -95.f : 95.f;
+                auto* burst = CCParticleExplosion::create();
+                burst->setTotalParticles(120);
+                burst->setPosition({window.width / 2.f + winnerX, window.height / 2.f + 5.f});
+                result->addChild(burst, 16);
             }
         }
         if (elapsed < RESULT_SUMMARY_TIME) {
@@ -809,6 +792,7 @@ public:
 };
 }
 void begin(PlayLayer* layer) { Session::get().beginSession(layer); }
+void detach(PlayLayer* layer) { Session::get().detachSession(layer); }
 bool activeFor(GJBaseGameLayer* layer) { return Session::get().owns(layer); }
 bool blocksGameplay(GJBaseGameLayer* layer) { auto& s = Session::get(); return s.owns(layer) && s.blocked(); }
 bool blocksInput(GJBaseGameLayer* layer) { return blocksGameplay(layer); }

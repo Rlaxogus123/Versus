@@ -1,3 +1,9 @@
+# v0.4.16
+
+- Detach the previous PlayLayer before constructing a rematch, avoiding teardown re-entry with checkpoint mods.
+- Reveal the winner one second sooner and emit the winner fireworks from the winning player's icon only.
+- Remove execution speed lines and keep only the fireball or spike attacks.
+
 # v0.4.15
 
 - Restore the original Versus interface styling and remove added sound cues.
