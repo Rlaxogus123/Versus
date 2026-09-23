@@ -1,4 +1,5 @@
 #include "BattleSession.hpp"
+#include "VersusAudio.hpp"
 #include "BattleProgress.hpp"
 #include "BattleHUD.hpp"
 #include "MapCache.hpp"
@@ -318,6 +319,7 @@ public:
         PlatformToolbox::showCursor();
 #endif
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
+        FMODAudioEngine::sharedEngine()->playEffect("endStart_02.ogg");
         auto window = CCDirector::sharedDirector()->getWinSize();
         auto* root = CCNode::create(); root->setID("battle-result"_spr);
         auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 175)); root->addChild(shade);
@@ -443,10 +445,28 @@ public:
         popup->setID("result-confirmation"_spr);
         float const panelWidth = std::min(390.f, window.width - 24.f);
         float const panelHeight = std::min(160.f, window.height - 24.f);
-        auto* panel = CCLayerColor::create(ccc4(8, 29, 56, 248));
+        auto* panelShadow = CCScale9Sprite::create("square02b_001.png");
+        panelShadow->setContentSize({panelWidth + 7.f, panelHeight + 8.f});
+        panelShadow->setPosition({window.width / 2.f + 3.f, window.height / 2.f - 4.f});
+        panelShadow->setColor(ccBLACK);
+        panelShadow->setOpacity(105);
+        popup->addChild(panelShadow, -3);
+        auto* panel = CCScale9Sprite::create("square02b_001.png");
         panel->setContentSize({panelWidth, panelHeight});
-        panel->setPosition({(window.width - panelWidth) / 2.f, (window.height - panelHeight) / 2.f});
-        popup->addChild(panel);
+        panel->setPosition({window.width / 2.f, window.height / 2.f});
+        panel->setColor(ccc3(7, 42, 96));
+        panel->setOpacity(250);
+        popup->addChild(panel, -2);
+        auto* panelWash = CCLayerGradient::create(ccc4(67, 178, 244, 78), ccc4(4, 22, 58, 12), {0.f, -1.f});
+        panelWash->setContentSize({panelWidth - 14.f, panelHeight - 14.f});
+        panelWash->setPosition({(window.width - panelWidth) / 2.f + 7.f,
+            (window.height - panelHeight) / 2.f + 7.f});
+        popup->addChild(panelWash, -1);
+        auto* panelTrim = CCDrawNode::create();
+        panelTrim->drawSegment({window.width / 2.f - panelWidth / 2.f + 14.f, window.height / 2.f + 42.f},
+            {window.width / 2.f + panelWidth / 2.f - 14.f, window.height / 2.f + 42.f},
+            .7f, {.43f, .85f, 1.f, .78f});
+        popup->addChild(panelTrim);
         auto popupLabel = [popup, window, panelWidth](std::string const& value, float y, float scale) {
             auto* text = CCLabelBMFont::create(value.c_str(), "bigFont.fnt");
             text->setPosition({window.width / 2.f, window.height / 2.f + y});
@@ -516,6 +536,7 @@ public:
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
+            audio::play(audio::Cue::WinnerReveal);
             if (auto section = progressSection.lock()) section->runAction(CCFadeOut::create(.3f));
             if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 100));
             if (auto section = winnerSection.lock()) {
@@ -539,6 +560,8 @@ public:
         if (elapsed < RESULT_CONFIRM_START) {
             if (!executionRevealed) {
                 executionRevealed = true;
+                if (!finalResult.draw)
+                    audio::play(audio::Cue::ExecutionImpact);
                 if (!finalResult.draw) {
                     if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.3f));
                     if (auto section = actorSection.lock())
@@ -551,6 +574,7 @@ public:
         }
         if (!confirmationVisible) {
             confirmationVisible = true;
+            audio::play(audio::Cue::ResultReveal);
             if (auto section = actorSection.lock()) section->runAction(CCFadeOut::create(.35f));
             if (auto section = winnerSection.lock()) section->runAction(CCFadeOut::create(.35f));
             if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.35f, 120));

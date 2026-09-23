@@ -1,4 +1,5 @@
 #include "VersusUI.hpp"
+#include "VersusAudio.hpp"
 #include "VersusService.hpp"
 #include "LevelSelector.hpp"
 #include "MatchLaunch.hpp"
@@ -32,6 +33,26 @@ constexpr int kRoomPageSize = 4;
 constexpr int kHistoryPageSize = 5;
 constexpr ccColor3B kIce = {155, 225, 255};
 constexpr ccColor3B kMuted = {150, 185, 225};
+constexpr ccColor3B kCyan = {72, 218, 255};
+constexpr ccColor3B kPink = {255, 132, 190};
+
+void cascadeOpacity(CCNode* node);
+
+void reveal(CCNode* node, float delay = 0.f, float rise = 8.f) {
+    if (!node) return;
+    cascadeOpacity(node);
+    if (auto* rgba = typeinfo_cast<CCRGBAProtocol*>(node)) rgba->setOpacity(0);
+    node->setPositionY(node->getPositionY() - rise);
+    node->runAction(CCSequence::create(
+        CCDelayTime::create(delay),
+        CCSpawn::create(
+            CCFadeIn::create(.34f),
+            CCEaseSineOut::create(CCMoveBy::create(.34f, {0.f, rise})),
+            nullptr
+        ),
+        nullptr
+    ));
+}
 
 ccColor3B unpackColor(int color) {
     return ccc3((color >> 16) & 255, (color >> 8) & 255, color & 255);
@@ -53,9 +74,16 @@ CCLabelBMFont* label(CCNode* parent, std::string const& text, CCPoint position,
 }
 
 CCNode* panel(CCNode* parent, CCPoint position, CCSize size, bool decorated = true) {
-    auto* node = CCNode::create();
+    auto* node = CCNodeRGBA::create();
+    node->setCascadeOpacityEnabled(true);
     node->setPosition(position);
     node->setContentSize(size);
+    auto* shadow = NineSlice::create(decorated ? "GJ_square02.png" : "square02b_001.png");
+    shadow->setContentSize(size + CCSize{5.f, 6.f});
+    shadow->setPosition(size / 2.f + CCPoint{2.f, -3.f});
+    shadow->setColor(ccBLACK);
+    shadow->setOpacity(95);
+    node->addChild(shadow, -4);
     auto* bg = NineSlice::create(decorated ? "GJ_square02.png" : "square02b_001.png");
     bg->setContentSize(size);
     bg->setPosition(size / 2.f);
@@ -63,7 +91,20 @@ CCNode* panel(CCNode* parent, CCPoint position, CCSize size, bool decorated = tr
         bg->setColor(ccc3(6, 30, 80));
         bg->setOpacity(170);
     }
-    node->addChild(bg, -1);
+    node->addChild(bg, -3);
+    auto* wash = CCLayerGradient::create(
+        decorated ? ccc4(46, 127, 198, 48) : ccc4(41, 134, 202, 48),
+        ccc4(3, 20, 58, decorated ? 34 : 70),
+        {0.f, -1.f});
+    wash->setContentSize({std::max(1.f, size.width - 14.f), std::max(1.f, size.height - 14.f)});
+    wash->setPosition({7.f, 7.f});
+    node->addChild(wash, -2);
+    auto* edge = CCDrawNode::create();
+    edge->drawSegment({10.f, size.height - 7.f}, {size.width - 10.f, size.height - 7.f},
+        .55f, {.64f, .9f, 1.f, .62f});
+    edge->drawSegment({12.f, 7.f}, {size.width - 12.f, 7.f},
+        .4f, {.05f, .12f, .28f, .72f});
+    node->addChild(edge, -1);
     parent->addChild(node);
     if (decorated) geode::addSideArt(node, SideArt::All, SideArtStyle::PopupBlue);
     return node;
@@ -202,6 +243,40 @@ CCNode* emoteArt(std::string const& kind) {
     return art;
 }
 
+class AmbientSparkles : public CCNode {
+public:
+    bool init() override {
+        if (!CCNode::init()) return false;
+        auto const window = CCDirector::sharedDirector()->getWinSize();
+        constexpr float points[][2] = {
+            {.08f,.18f},{.17f,.72f},{.27f,.38f},{.36f,.84f},{.46f,.13f},{.55f,.63f},
+            {.66f,.29f},{.73f,.79f},{.82f,.47f},{.91f,.16f},{.95f,.69f},{.04f,.51f}
+        };
+        for (size_t i = 0; i < sizeof(points) / sizeof(points[0]); ++i) {
+            auto* star = CCDrawNode::create();
+            float const radius = 1.35f + static_cast<float>(i % 3) * .35f;
+            CCPoint diamond[] = {{0.f, radius * 1.7f}, {radius, 0.f},
+                {0.f, -radius * 1.7f}, {-radius, 0.f}};
+            star->drawPolygon(diamond, 4, {.68f, .9f, 1.f, .72f}, 0.f, {0.f, 0.f, 0.f, 0.f});
+            star->setPosition({window.width * points[i][0], window.height * points[i][1]});
+            star->setOpacity(35);
+            star->setScale(.75f);
+            addChild(star);
+            float const delay = static_cast<float>(i % 5) * .19f;
+            float const duration = 1.35f + static_cast<float>(i % 4) * .24f;
+            star->runAction(CCRepeatForever::create(CCSequence::create(
+                CCDelayTime::create(delay),
+                CCSpawn::create(CCFadeTo::create(duration, 135),
+                    CCEaseSineInOut::create(CCScaleTo::create(duration, 1.15f)), nullptr),
+                CCSpawn::create(CCFadeTo::create(duration, 28),
+                    CCEaseSineInOut::create(CCScaleTo::create(duration, .72f)), nullptr),
+                nullptr)));
+        }
+        return true;
+    }
+    CREATE_FUNC(AmbientSparkles);
+};
+
 // A small fixed number of tiles moves independently of network/UI refreshes.
 class MovingBackground : public CCNode {
     CCNode* m_tiles = nullptr;
@@ -230,6 +305,9 @@ public:
             tile->setPosition({(i + .5f) * m_tileWidth, window.height / 2.f});
             m_tiles->addChild(tile);
         }
+        auto* depth = CCLayerGradient::create(ccc4(0, 15, 58, 35), ccc4(0, 5, 30, 150), {0.f, -1.f});
+        depth->setContentSize(window);
+        addChild(depth, 3);
         scheduleUpdate();
         return true;
     }
@@ -247,18 +325,47 @@ protected:
     CCSize m_window;
     bool m_transitioning = false;
     CCMenuItemSpriteExtra* m_back = nullptr;
+    CCNodeRGBA* m_header = nullptr;
 
     bool initScene(std::string const& title) {
         if (!CCLayer::init()) return false;
         m_window = CCDirector::sharedDirector()->getWinSize();
         addChild(MovingBackground::create(), -10);
+        addChild(AmbientSparkles::create(), -9);
         auto* nav = menu(this);
         auto* backSprite = CCSprite::createWithSpriteFrameName("GJ_arrow_01_001.png");
         backSprite->setScale(.72f);
         m_back = CCMenuItemSpriteExtra::create(backSprite, this, menu_selector(SceneLayer::onBack));
         m_back->setPosition({23.f, m_window.height - 24.f});
         nav->addChild(m_back);
-        label(this, title, {m_window.width / 2.f, m_window.height - 25.f}, .8f, m_window.width - 100.f);
+        float const headerWidth = std::min(280.f, m_window.width - 105.f);
+        m_header = CCNodeRGBA::create();
+        m_header->setCascadeOpacityEnabled(true);
+        m_header->setContentSize({headerWidth, 43.f});
+        m_header->setPosition({(m_window.width - headerWidth) / 2.f, m_window.height - 47.f});
+        auto* headerShadow = NineSlice::create("square02b_001.png");
+        headerShadow->setContentSize({headerWidth + 4.f, 42.f});
+        headerShadow->setPosition({headerWidth / 2.f + 2.f, 18.f});
+        headerShadow->setColor(ccBLACK);
+        headerShadow->setOpacity(80);
+        m_header->addChild(headerShadow, -3);
+        auto* headerBG = NineSlice::create("square02b_001.png");
+        headerBG->setContentSize({headerWidth, 40.f});
+        headerBG->setPosition({headerWidth / 2.f, 21.f});
+        headerBG->setColor(ccc3(7, 42, 105));
+        headerBG->setOpacity(235);
+        m_header->addChild(headerBG, -2);
+        auto* headerGlow = CCLayerGradient::create(ccc4(65, 187, 255, 85), ccc4(10, 44, 108, 5), {0.f, -1.f});
+        headerGlow->setContentSize({headerWidth - 10.f, 30.f});
+        headerGlow->setPosition({5.f, 7.f});
+        m_header->addChild(headerGlow, -1);
+        auto* trim = CCDrawNode::create();
+        trim->drawSegment({13.f, 5.f}, {headerWidth - 13.f, 5.f}, .65f, {.35f, .82f, 1.f, .85f});
+        m_header->addChild(trim);
+        label(m_header, title, {headerWidth / 2.f, 26.f}, .66f, headerWidth - 24.f);
+        label(m_header, title == "Versus" ? "ONLINE DUEL" : "MATCH LOBBY",
+            {headerWidth / 2.f, 9.f}, .23f, headerWidth - 30.f, kIce, false, "chatFont.fnt");
+        addChild(m_header, 7);
         setKeypadEnabled(true);
         return true;
     }
@@ -272,6 +379,8 @@ public:
         PlatformToolbox::toggleLockCursor(false);
         PlatformToolbox::showCursor();
 #endif
+        reveal(m_header, .03f, 7.f);
+        audio::play(audio::Cue::UiOpen);
         scheduleUpdate();
     }
     void onExit() override {
@@ -329,6 +438,7 @@ class CreateRoomPopup : public Popup {
     void onPrivacy(CCObject*) {
         if (m_pending) return;
         m_private = !m_private;
+        audio::playBuiltin("chestClick.ogg");
         m_privacy->setString(m_private ? "Private room" : "Public room");
         m_lockSprite->setOpacity(m_private ? 255 : 110);
         m_lockSprite->setColor(m_private ? kIce : ccc3(255, 255, 255));
@@ -358,6 +468,7 @@ class CreateRoomPopup : public Popup {
                 if (!owner) return;
                 owner->m_pending = false;
                 if (success) {
+                    audio::playBuiltin("door01.ogg");
                     owner->onClose(nullptr);
                     showRoom();
                     return;
@@ -422,6 +533,7 @@ class JoinRoomPopup : public Popup {
                 if (!owner) return;
                 owner->m_pending = false;
                 if (success) {
+                    audio::playBuiltin("door01.ogg");
                     owner->onClose(nullptr);
                     showRoom();
                     return;
@@ -803,6 +915,8 @@ class LobbyLayer : public SceneLayer {
             {statsWidth / 2.f, 21.f}, .44f, "GJ_button_04.png");
         enabled(m_history, false);
         refreshStats();
+        reveal(m_listPanel, .08f, 10.f);
+        reveal(m_statsPanel, .15f, 10.f);
         return true;
     }
     void connect() {
@@ -1008,6 +1122,7 @@ class LobbyLayer : public SceneLayer {
         if (room.guest || room.started) return;
         m_search->defocus();
         if (room.privateRoom) {
+            audio::playBuiltin("chestClick.ogg");
             if (auto* popup = JoinRoomPopup::create(room)) popup->show();
             return;
         }
@@ -1020,6 +1135,7 @@ class LobbyLayer : public SceneLayer {
             if (!owner || owner->m_transitioning) return;
             owner->m_mutating = false;
             if (success) {
+                audio::playBuiltin("door01.ogg");
                 owner->m_transitioning = true;
                 showRoom();
                 return;
@@ -1179,12 +1295,15 @@ class RoomLayer : public SceneLayer {
     bool init() {
         if (!initScene("Versus Room")) return false;
         setID("versus-room"_spr);
-        m_content = CCNode::create();
+        auto* content = CCNodeRGBA::create();
+        content->setCascadeOpacityEnabled(true);
+        m_content = content;
         addChild(m_content);
         m_emotes = CCNode::create();
         addChild(m_emotes, 30);
         m_status = label(this, "", {m_window.width / 2.f, 10.f}, .3f, m_window.width - 40.f, kIce);
         render();
+        reveal(m_content, .09f, 10.f);
         return true;
     }
     std::string signature(RoomInfo const& room) {
@@ -1204,6 +1323,14 @@ class RoomLayer : public SceneLayer {
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
         CCPoint origin, CCSize size, bool mine, bool host, bool ready, bool checkingResult = false) {
         auto* card = panel(parent, origin, size, false);
+        auto const accent = mine ? kCyan : kPink;
+        auto* accentLine = CCDrawNode::create();
+        accentLine->drawSegment({8.f, size.height - 6.f}, {size.width - 8.f, size.height - 6.f},
+            1.05f, {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .95f});
+        accentLine->drawSegment({mine ? 6.f : size.width - 6.f, 10.f},
+            {mine ? 6.f : size.width - 6.f, size.height - 10.f}, .7f,
+            {accent.r / 255.f, accent.g / 255.f, accent.b / 255.f, .52f});
+        card->addChild(accentLine, 2);
         label(card, mine ? "YOU" : "OPPONENT", {size.width / 2.f, size.height - 13.f}, .29f, size.width - 12.f, kIce);
         if (profile) {
             if (checkingResult) {
@@ -1270,27 +1397,40 @@ class RoomLayer : public SceneLayer {
             false, !host, opponentReady, opponentChecking);
         float const centerWidth = width - 2.f * cardWidth - 40.f;
         float const centerX = width / 2.f;
+        auto* mapWell = NineSlice::create("square02b_001.png");
+        mapWell->setContentSize({centerWidth + 12.f, cardHeight - 7.f});
+        mapWell->setPosition({centerX, 48.f + cardHeight / 2.f});
+        mapWell->setColor(ccc3(5, 30, 76));
+        mapWell->setOpacity(195);
+        frame->addChild(mapWell, -1);
+        auto* versusBadge = CCDrawNode::create();
+        versusBadge->drawDot({0.f, 0.f}, 14.f, {.025f, .11f, .27f, .94f});
+        versusBadge->drawCircle({0.f, 0.f}, 13.f, {0.f, 0.f, 0.f, 0.f},
+            1.2f, {.36f, .82f, 1.f, .85f}, 32);
+        versusBadge->setPosition({centerX, height - 54.f});
+        frame->addChild(versusBadge, 1);
+        label(frame, "VS", {centerX, height - 54.f}, .34f, 25.f, ccWHITE);
         // The native sprite's NA/Auto values are reversed from GJDifficulty.
         int const difficulty = room.level.id
             ? (room.level.autoLevel ? -1 : std::clamp(room.level.difficulty, 0, 10)) : 0;
         auto* face = GJDifficultySprite::create(difficulty, GJDifficultyName::Short);
         if (face) {
             face->setScale(.90f);
-            face->setPosition({centerX, height - 79.f});
+            face->setPosition({centerX, height - 86.f});
             frame->addChild(face);
         }
         label(frame, room.level.id ? room.level.name : "Choose a map",
-            {centerX, height - 114.f}, .45f, centerWidth);
+            {centerX, height - 121.f}, .45f, centerWidth);
         if (room.level.id) {
             auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
             if (star) {
                 star->setScale(.75f);
-                star->setPosition({centerX + 15.f, height - 134.f});
+                star->setPosition({centerX + 15.f, height - 141.f});
                 frame->addChild(star);
             }
-            label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 134.f}, .40f, 40.f, ccc3(255, 230, 130));
+            label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 141.f}, .40f, 40.f, ccc3(255, 230, 130));
         } else {
-            label(frame, "A map for your duel", {centerX, height - 135.f}, .39f,
+            label(frame, "A map for your duel", {centerX, height - 142.f}, .39f,
                 centerWidth, kMuted, false, "chatFont.fnt");
         }
         auto* actions = menu(frame);
@@ -1377,6 +1517,7 @@ class RoomLayer : public SceneLayer {
     void onRules(CCObject*) {
         auto const& room = Service::get().room();
         if (m_pending || Service::get().busy() || !room || !Service::get().isHost() || room->started) return;
+        audio::playBuiltin("chestClick.ogg");
         if (auto* popup = GameRulesPopup::create(*room)) popup->show();
     }
     void onDownload(CCObject*) {
@@ -1398,7 +1539,8 @@ class RoomLayer : public SceneLayer {
             auto owner = self.lock();
             if (!owner) return;
             owner->m_sendingEmote = false;
-            if (!success) error(detail);
+            if (success) audio::playBuiltin("chestClick.ogg");
+            else error(detail);
         });
     }
     void onChoose(CCObject*) {
@@ -1422,7 +1564,8 @@ class RoomLayer : public SceneLayer {
             if (!owner) return;
             owner->m_pending = false;
             owner->requestRender();
-            if (!success) error(detail);
+            if (success) audio::playBuiltin("endStart_02.ogg");
+            else error(detail);
         });
     }
     void onReady(CCObject*) {
@@ -1443,12 +1586,16 @@ class RoomLayer : public SceneLayer {
         bool const ready = control.action == ReadyAction::Ready;
         m_pending = true;
         requestRender();
-        Service::get().setReady(ready, [self = WeakRef<RoomLayer>(this)](bool success, std::string detail) {
+        Service::get().setReady(ready, [self = WeakRef<RoomLayer>(this), ready](bool success, std::string detail) {
             auto owner = self.lock();
             if (!owner) return;
             owner->m_pending = false;
             owner->requestRender();
-            if (!success) error(detail);
+            if (success) {
+                if (ready) audio::play(audio::Cue::ReadyLock);
+                else audio::playBuiltin("quitSound_01.ogg");
+            }
+            else error(detail);
         });
     }
     void goBack() override {

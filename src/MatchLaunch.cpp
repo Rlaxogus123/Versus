@@ -1,4 +1,5 @@
 #include "MatchLaunch.hpp"
+#include "VersusAudio.hpp"
 #include "MapCache.hpp"
 #include "BattleSession.hpp"
 #include "VersusService.hpp"
@@ -154,27 +155,55 @@ public:
 
     void installLabel(CCNode* parent, bool cancelButtonVisible) {
         auto window = CCDirector::sharedDirector()->getWinSize();
-        auto* panel = CCScale9Sprite::create("square02b_001.png");
-        panel->setContentSize({340.f, 94.f});
-        panel->setColor(ccc3(11, 48, 88));
-        panel->setOpacity(235);
-        panel->setPosition(window / 2.f);
-        auto* root = CCNode::create();
+        auto* root = CCNodeRGBA::create();
+        root->setCascadeOpacityEnabled(true);
         root->setID("versus-launch-wait"_spr);
-        root->addChild(panel);
+        auto* shadow = CCScale9Sprite::create("square02b_001.png");
+        shadow->setContentSize({356.f, 112.f});
+        shadow->setColor(ccBLACK);
+        shadow->setOpacity(90);
+        shadow->setPosition(window / 2.f + CCPoint{3.f, -4.f});
+        root->addChild(shadow, -3);
+        auto* panel = CCScale9Sprite::create("square02b_001.png");
+        panel->setContentSize({352.f, 108.f});
+        panel->setColor(ccc3(7, 43, 101));
+        panel->setOpacity(245);
+        panel->setPosition(window / 2.f);
+        root->addChild(panel, -2);
+        auto* wash = CCLayerGradient::create(ccc4(65, 182, 255, 72), ccc4(4, 22, 62, 15), {0.f, -1.f});
+        wash->setContentSize({334.f, 88.f});
+        wash->setPosition({window.width / 2.f - 167.f, window.height / 2.f - 42.f});
+        root->addChild(wash, -1);
         auto* title = CCLabelBMFont::create("VERSUS", "bigFont.fnt");
-        title->setScale(.55f);
-        title->setPosition({window.width / 2.f, window.height / 2.f + 25.f});
+        title->setScale(.58f);
+        title->setPosition({window.width / 2.f, window.height / 2.f + 31.f});
         root->addChild(title);
+        auto* kicker = CCLabelBMFont::create("SYNCHRONIZED START", "chatFont.fnt");
+        kicker->setScale(.46f);
+        kicker->setColor(ccc3(145, 220, 255));
+        kicker->setPosition({window.width / 2.f, window.height / 2.f + 16.f});
+        root->addChild(kicker);
         auto* status = CCLabelBMFont::create("Loading selected map...", "chatFont.fnt");
-        status->setScale(.85f);
+        status->setScale(.78f);
         status->setAlignment(kCCTextAlignmentCenter);
-        status->setPosition({window.width / 2.f, window.height / 2.f - 2.f});
+        status->setPosition({window.width / 2.f, window.height / 2.f - 3.f});
         root->addChild(status);
         label = status;
+        auto* track = CCLayerColor::create(ccc4(255, 255, 255, 38));
+        track->setContentSize({280.f, 2.f});
+        track->setPosition({window.width / 2.f - 140.f, window.height / 2.f - 22.f});
+        root->addChild(track);
+        auto* sweep = CCLayerColor::create(ccc4(128, 226, 255, 235));
+        sweep->setContentSize({70.f, 2.f});
+        sweep->setPosition({window.width / 2.f - 140.f, window.height / 2.f - 22.f});
+        root->addChild(sweep, 2);
+        sweep->runAction(CCRepeatForever::create(CCSequence::create(
+            CCEaseSineInOut::create(CCMoveBy::create(1.05f, {210.f, 0.f})),
+            CCPlace::create({window.width / 2.f - 140.f, window.height / 2.f - 22.f}),
+            nullptr)));
         if (cancelButtonVisible) {
             auto* menu = CCMenu::create();
-            menu->setPosition({window.width / 2.f, window.height / 2.f - 29.f});
+            menu->setPosition({window.width / 2.f, window.height / 2.f - 40.f});
             auto* caption = CCLabelBMFont::create("Cancel", "chatFont.fnt");
             caption->setScale(.75f);
             caption->setColor(ccc3(145, 210, 255));
@@ -182,6 +211,8 @@ public:
             root->addChild(menu);
         }
         parent->addChild(root, 100000);
+        root->setOpacity(0);
+        root->runAction(CCFadeIn::create(.42f));
     }
 
     void begin() {
@@ -222,6 +253,7 @@ public:
         CCDirector::sharedDirector()->replaceScene(scene);
         FMODAudioEngine::sharedEngine()->stopAllMusic(true);
         FMODAudioEngine::sharedEngine()->stopAllEffects();
+        versus::audio::playBuiltin("door02.ogg");
     }
 
     void requestDownload() {

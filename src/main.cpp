@@ -37,15 +37,35 @@ class $modify(VersusCreatorLayer, CreatorLayer) {
         button->setEnabled(true);
         button->setTarget(this, menu_selector(VersusCreatorLayer::onOpenVersus));
 
+        auto* badge = CCNodeRGBA::create();
+        badge->setCascadeOpacityEnabled(true);
+        badge->setContentSize({106.f, 23.f});
+        badge->setPosition({
+            button->getPositionX() - 53.f,
+            button->getPositionY() + button->getContentSize().height / 2.f + 1.f
+        });
+        badge->setID("versus-mode-label"_spr);
+        auto* shadow = NineSlice::create("square02b_001.png");
+        shadow->setContentSize({110.f, 25.f});
+        shadow->setPosition({55.f, 10.f});
+        shadow->setColor(ccBLACK);
+        shadow->setOpacity(75);
+        badge->addChild(shadow, -2);
+        auto* plate = NineSlice::create("square02b_001.png");
+        plate->setContentSize({106.f, 23.f});
+        plate->setPosition({53.f, 12.f});
+        plate->setColor(ccc3(20, 73, 148));
+        plate->setOpacity(235);
+        badge->addChild(plate, -1);
         auto* title = CCLabelBMFont::create("Versus Mode!", "goldFont.fnt");
         title->setScale(.38f);
-        title->limitLabelWidth(button->getContentSize().width + 38.f, .38f, .25f);
-        title->setPosition({
-            button->getPositionX(),
-            button->getPositionY() + button->getContentSize().height / 2.f + 10.f
-        });
-        title->setID("versus-mode-label"_spr);
-        menu->addChild(title, 10);
+        title->limitLabelWidth(94.f, .38f, .25f);
+        title->setPosition({53.f, 12.f});
+        badge->addChild(title);
+        badge->runAction(CCRepeatForever::create(CCSequence::create(
+            CCEaseSineInOut::create(CCScaleTo::create(1.15f, 1.025f)),
+            CCEaseSineInOut::create(CCScaleTo::create(1.15f, 1.f)), nullptr)));
+        menu->addChild(badge, 10);
 
         return true;
     }

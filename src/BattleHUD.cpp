@@ -51,19 +51,37 @@ struct Card {
     void create(CCNode* parent, PlayerProfile const& player, GameRules const& rules,
         CCPoint position, float width, bool mirrored) {
         constexpr float height = 54.f;
-        auto* root = CCNode::create();
+        auto* root = CCNodeRGBA::create();
+        root->setCascadeOpacityEnabled(true);
         root->setPosition(position);
         root->setContentSize({width, height});
         parent->addChild(root);
 
-        auto* background = CCLayerColor::create(ccc4(5, 18, 38, 225));
+        auto* shadow = NineSlice::create("square02b_001.png");
+        shadow->setContentSize({width + 4.f, height + 4.f});
+        shadow->setPosition({width / 2.f + (mirrored ? -2.f : 2.f), height / 2.f - 2.f});
+        shadow->setColor(ccBLACK);
+        shadow->setOpacity(90);
+        root->addChild(shadow, -3);
+        auto* background = NineSlice::create("square02b_001.png");
         background->setContentSize({width, height});
-        root->addChild(background);
+        background->setPosition({width / 2.f, height / 2.f});
+        background->setColor(mirrored ? ccc3(39, 24, 70) : ccc3(6, 40, 78));
+        background->setOpacity(240);
+        root->addChild(background, -2);
+        auto* wash = CCLayerGradient::create(
+            mirrored ? ccc4(170, 66, 153, 58) : ccc4(44, 168, 225, 62),
+            ccc4(4, 12, 35, 25), {mirrored ? -1.f : 1.f, -.2f});
+        wash->setContentSize({width - 8.f, height - 7.f});
+        wash->setPosition({4.f, 3.f});
+        root->addChild(wash, -1);
         auto* border = CCDrawNode::create();
         CCPoint outline[] = {{1.f, 1.f}, {width - 1.f, 1.f},
             {width - 1.f, height - 1.f}, {1.f, height - 1.f}};
         border->drawPolygon(outline, 4, {0.f, 0.f, 0.f, 0.f}, 1.2f,
-            {.48f, .78f, .96f, .95f});
+            mirrored ? ccColor4F{1.f, .48f, .75f, .92f} : ccColor4F{.35f, .84f, 1.f, .95f});
+        border->drawSegment({8.f, height - 4.f}, {width - 8.f, height - 4.f}, 1.f,
+            mirrored ? ccColor4F{1.f, .52f, .77f, .9f} : ccColor4F{.33f, .88f, 1.f, .92f});
         root->addChild(border);
 
         float const iconX = mirrored ? width - 25.f : 25.f;
@@ -100,6 +118,11 @@ struct Card {
         progress = makeLabel("", {edge + (lives ? (mirrored ? -22.f : 22.f) : 0.f), 24.f},
             ccc3(181, 235, 255));
         detail = makeLabel("", {edge, 8.f}, ccc3(132, 200, 235));
+
+        root->setOpacity(0);
+        root->setPositionX(root->getPositionX() + (mirrored ? 9.f : -9.f));
+        root->runAction(CCSpawn::create(CCFadeIn::create(.38f),
+            CCEaseSineOut::create(CCMoveBy::create(.38f, {mirrored ? -9.f : 9.f, 0.f})), nullptr));
     }
 
     void update(BattlePlayerState const& state, GameRules const& rules) {

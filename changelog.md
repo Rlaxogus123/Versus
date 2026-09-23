@@ -1,3 +1,9 @@
+# v0.4.13
+
+- Refresh the lobby, room, battle HUD, synchronized start, result panel, and Creator Layer badge with native Geometry Dash framing and cleaner spacing.
+- Add restrained sparkles, shadows, cyan/pink player accents, and fade/slide transitions.
+- Add stage-specific sound cues with five optional custom OGG overrides and built-in fallbacks.
+
 # v0.4.12
 
 - Remove automatic cheating detection and its alerts.
