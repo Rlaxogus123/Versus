@@ -1,5 +1,4 @@
 #include "BattleSession.hpp"
-#include "VersusAudio.hpp"
 #include "BattleProgress.hpp"
 #include "BattleHUD.hpp"
 #include "MapCache.hpp"
@@ -20,10 +19,11 @@ namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr float RESULT_PROGRESS_TIME = 5.f;
-constexpr float RESULT_WINNER_TIME = 3.5f;
+constexpr float RESULT_DECISION_TIME = 2.5f;
+constexpr float RESULT_SUMMARY_TIME = RESULT_PROGRESS_TIME + RESULT_DECISION_TIME;
 constexpr float RESULT_EXECUTION_TIME = 4.2f;
 constexpr float RESULT_CONFIRM_TIME = 20.f;
-constexpr float RESULT_CONFIRM_START = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + RESULT_EXECUTION_TIME;
+constexpr float RESULT_CONFIRM_START = RESULT_SUMMARY_TIME + RESULT_EXECUTION_TIME;
 ccColor3B color(int rgb) { return ccc3((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
 SimplePlayer* icon(PlayerProfile const& profile, float scale = .85f) {
     auto* manager = GameManager::sharedState();
@@ -63,7 +63,7 @@ public:
     WeakRef<CCLabelBMFont> hostPercent, guestPercent;
     WeakRef<CCLayerColor> hostGauge, guestGauge;
     WeakRef<CCLayerColor> transitionShade, resultTimerFill;
-    WeakRef<CCNodeRGBA> progressSection, winnerSection, actorSection, resultPopup;
+    WeakRef<CCNodeRGBA> progressSection, decisionBanner, actorSection, resultPopup;
     WeakRef<CCNode> resultRoot;
     float resultTimerWidth = 0.f;
     float displayedHostPercent = 0.f;
@@ -155,7 +155,7 @@ public:
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; resultVisible = false;
         winnerRevealed = false; executionRevealed = false; confirmationVisible = false;
-        progressSection = nullptr; winnerSection = nullptr; actorSection = nullptr;
+        progressSection = nullptr; decisionBanner = nullptr; actorSection = nullptr;
         transitionShade = nullptr; resultTimerFill = nullptr;
         hostPercent = nullptr; guestPercent = nullptr;
         hostGauge = nullptr; guestGauge = nullptr;
@@ -322,7 +322,6 @@ public:
         PlatformToolbox::showCursor();
 #endif
         FMODAudioEngine::sharedEngine()->pauseAllMusic(true);
-        FMODAudioEngine::sharedEngine()->playEffect("endStart_02.ogg");
         auto window = CCDirector::sharedDirector()->getWinSize();
         auto* root = CCNode::create(); root->setID("battle-result"_spr);
         auto* shade = CCLayerColor::create(ccc4(5, 20, 50, 175)); root->addChild(shade);
@@ -336,20 +335,23 @@ public:
         auto* progress = section(5); progressSection = progress;
         auto* curtain = CCLayerColor::create(ccc4(0, 0, 0, 0));
         root->addChild(curtain, 10); transitionShade = curtain;
-        auto* winner = section(15); winnerSection = winner;
+        auto* decision = CCNodeRGBA::create();
+        decision->setCascadeOpacityEnabled(true);
+        decision->setOpacity(0);
+        progress->addChild(decision, 15); decisionBanner = decision;
         auto* actors = section(20); actorSection = actors;
         auto const winnerName = info.winnerUid == hostProfile.uid ? hostProfile.name : guestProfile.name;
         auto* title = CCLabelBMFont::create(info.draw ? "DRAW" : (winnerName + " WINS!").c_str(), "bigFont.fnt");
         title->setPosition({window.width / 2.f, window.height / 2.f + 94.f});
         title->limitLabelWidth(window.width - 40.f, .75f, .3f);
-        winner->addChild(title, 10);
+        decision->addChild(title, 10);
         auto resultLabel = [window](CCNode* parent, std::string text, float x, float y, float width, float scale,
                                             char const* font = "chatFont.fnt") {
             auto* value = CCLabelBMFont::create(text.c_str(), font);
             value->setScale(std::min(scale, width / std::max(1.f, value->getContentSize().width)));
             value->setPosition({window.width / 2.f + x, window.height / 2.f + y}); parent->addChild(value, 5); return value;
         };
-        resultLabel(winner, info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost",
+        resultLabel(decision, info.draw ? "Equal result" : info.winnerUid == uid ? "You won!" : "You lost",
             0.f, 65.f, window.width-40.f, .95f);
         auto* hostPreview = icon(hostProfile, 1.8f);
         auto* guestPreview = icon(guestProfile, 1.8f);
@@ -394,7 +396,7 @@ public:
                         (loserState.forfeited ? "Match forfeited" : "Pause timeout"), "chatFont.fnt");
                 reason->setScale(.75f);
                 reason->setPosition({window.width / 2.f, window.height / 2.f + 36.f});
-                winner->addChild(reason);
+                decision->addChild(reason);
             }
         }
         auto* a = icon(hostProfile, 1.8f); auto* b = icon(guestProfile, 1.8f); b->setFlipX(true);
@@ -412,7 +414,7 @@ public:
             unsigned variant = 0;
             for (unsigned char value : battleID) variant = variant * 33u + value;
             variant %= 3u;
-            float const executionStart = RESULT_PROGRESS_TIME + RESULT_WINNER_TIME + .55f;
+            float const executionStart = RESULT_SUMMARY_TIME + .55f;
             float impactDelay = executionStart + .48f;
 
             auto* streaks = CCDrawNode::create();
@@ -518,7 +520,6 @@ public:
             root->addChild(flash, 28);
             flash->runAction(CCSequence::create(
                 CCDelayTime::create(impactDelay),
-                CallFuncExt::create([] { audio::play(audio::Cue::ExecutionImpact); }),
                 CCFadeTo::create(.045f, 195),
                 CCFadeTo::create(.20f, 0), nullptr));
             auto* impact = CCParticleExplosion::create();
@@ -538,35 +539,45 @@ public:
         popup->setOpacity(0); popup->setVisible(false);
         popup->setID("result-confirmation"_spr);
         float const panelWidth = std::min(390.f, window.width - 24.f);
-        float const panelHeight = std::min(160.f, window.height - 24.f);
-        auto* panelShadow = CCScale9Sprite::create("square02b_001.png");
-        panelShadow->setContentSize({panelWidth + 7.f, panelHeight + 8.f});
-        panelShadow->setPosition({window.width / 2.f + 3.f, window.height / 2.f - 4.f});
-        panelShadow->setColor(ccBLACK);
-        panelShadow->setOpacity(105);
-        popup->addChild(panelShadow, -3);
-        auto* panel = CCScale9Sprite::create("square02b_001.png");
+        float const panelHeight = std::min(190.f, window.height - 24.f);
+        auto* panel = CCLayerColor::create(ccc4(8, 29, 56, 248));
         panel->setContentSize({panelWidth, panelHeight});
-        panel->setPosition({window.width / 2.f, window.height / 2.f});
-        panel->setColor(ccc3(7, 42, 96));
-        panel->setOpacity(250);
-        popup->addChild(panel, -2);
-        auto* panelTrim = CCDrawNode::create();
-        panelTrim->drawSegment({window.width / 2.f - panelWidth / 2.f + 14.f, window.height / 2.f + 42.f},
-            {window.width / 2.f + panelWidth / 2.f - 14.f, window.height / 2.f + 42.f},
-            .7f, {.43f, .85f, 1.f, .78f});
-        popup->addChild(panelTrim);
-        auto popupLabel = [popup, window, panelWidth](std::string const& value, float y, float scale) {
-            auto* text = CCLabelBMFont::create(value.c_str(), "bigFont.fnt");
-            text->setPosition({window.width / 2.f, window.height / 2.f + y});
-            text->limitLabelWidth(panelWidth - 24.f, scale, .2f);
+        panel->setPosition({(window.width - panelWidth) / 2.f, (window.height - panelHeight) / 2.f});
+        popup->addChild(panel);
+        auto popupLabel = [popup, window](std::string const& value, float x, float y,
+                                          float width, float scale, char const* font = "bigFont.fnt") {
+            auto* text = CCLabelBMFont::create(value.c_str(), font);
+            text->setPosition({window.width / 2.f + x, window.height / 2.f + y});
+            text->limitLabelWidth(width, scale, .2f);
             popup->addChild(text, 2);
+            return text;
         };
-        popupLabel("MATCH RESULT", 56.f, .55f);
-        popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 27.f, .65f);
-        popupLabel(fmt::format("{}  {}%  :  {}%  {}", hostProfile.name, info.host.bestPercent,
-            info.guest.bestPercent, guestProfile.name), -2.f, .40f);
-        auto* menu = CCMenu::create(); menu->setPosition({window.width / 2.f, window.height / 2.f - 51.f});
+        popupLabel("MATCH RESULT", 0.f, 76.f, panelWidth - 24.f, .48f);
+        popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 0.f, 55.f, panelWidth - 24.f, .55f);
+
+        constexpr float playerX = 82.f;
+        auto* hostResultIcon = icon(hostProfile,
+            !info.draw && info.winnerUid == hostProfile.uid ? 1.35f : 1.05f);
+        auto* guestResultIcon = icon(guestProfile,
+            !info.draw && info.winnerUid == guestProfile.uid ? 1.35f : 1.05f);
+        guestResultIcon->setFlipX(true);
+        hostResultIcon->setPosition({window.width / 2.f - playerX, window.height / 2.f + 10.f});
+        guestResultIcon->setPosition({window.width / 2.f + playerX, window.height / 2.f + 10.f});
+        if (!info.draw && info.winnerUid != hostProfile.uid) hostResultIcon->setOpacity(115);
+        if (!info.draw && info.winnerUid != guestProfile.uid) guestResultIcon->setOpacity(115);
+        popup->addChild(hostResultIcon, 3);
+        popup->addChild(guestResultIcon, 3);
+        popupLabel("VS", 0.f, 8.f, 38.f, .42f);
+        popupLabel(hostProfile.name, -playerX, -25.f, 125.f, .48f, "chatFont.fnt");
+        popupLabel(guestProfile.name, playerX, -25.f, 125.f, .48f, "chatFont.fnt");
+        auto* hostScore = popupLabel(fmt::format("{}%", info.host.bestPercent),
+            -playerX, -44.f, 100.f, .42f);
+        auto* guestScore = popupLabel(fmt::format("{}%", info.guest.bestPercent),
+            playerX, -44.f, 100.f, .42f);
+        if (info.draw || info.winnerUid == hostProfile.uid) hostScore->setColor(ccc3(179, 237, 255));
+        if (info.draw || info.winnerUid == guestProfile.uid) guestScore->setColor(ccc3(179, 237, 255));
+
+        auto* menu = CCMenu::create(); menu->setPosition({window.width / 2.f, window.height / 2.f - 72.f});
         auto* button = ButtonSprite::create("Return to Room", "goldFont.fnt", "GJ_button_01.png");
         button->setScale(.72f);
         menu->addChild(CCMenuItemSpriteExtra::create(button, this, menu_selector(Session::onResultExit)));
@@ -595,12 +606,10 @@ public:
     void updateResultVisual(float elapsed, float dt) {
         if (!resultVisible) return;
         float remaining = 0.f;
-        if (elapsed < RESULT_PROGRESS_TIME)
-            remaining = 1.f - elapsed / RESULT_PROGRESS_TIME;
-        else if (elapsed < RESULT_PROGRESS_TIME + RESULT_WINNER_TIME)
-            remaining = 1.f - (elapsed - RESULT_PROGRESS_TIME) / RESULT_WINNER_TIME;
+        if (elapsed < RESULT_SUMMARY_TIME)
+            remaining = 1.f - elapsed / RESULT_SUMMARY_TIME;
         else if (elapsed < RESULT_CONFIRM_START)
-            remaining = 1.f - (elapsed - RESULT_PROGRESS_TIME - RESULT_WINNER_TIME) / RESULT_EXECUTION_TIME;
+            remaining = 1.f - (elapsed - RESULT_SUMMARY_TIME) / RESULT_EXECUTION_TIME;
         else
             remaining = 1.f - (elapsed - RESULT_CONFIRM_START) / RESULT_CONFIRM_TIME;
         if (auto bar = resultTimerFill.lock())
@@ -636,14 +645,8 @@ public:
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
-            audio::play(audio::Cue::WinnerReveal);
-            if (auto section = progressSection.lock()) section->runAction(CCSequence::create(
-                CCFadeOut::create(.3f), CCHide::create(), nullptr));
-            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 100));
-            if (auto section = winnerSection.lock()) {
-                section->runAction(CCSequence::create(CCDelayTime::create(.3f),
-                    CCFadeIn::create(.65f), nullptr));
-            }
+            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 65));
+            if (auto banner = decisionBanner.lock()) banner->runAction(CCFadeIn::create(.55f));
             if (!finalResult.draw) if (auto result = resultRoot.lock()) {
                 auto window = CCDirector::sharedDirector()->getWinSize();
                 for (float offset : {-90.f, 90.f}) {
@@ -654,7 +657,7 @@ public:
                 }
             }
         }
-        if (elapsed < RESULT_PROGRESS_TIME + RESULT_WINNER_TIME) {
+        if (elapsed < RESULT_SUMMARY_TIME) {
             label(returnStatus, finalResult.draw ? "DRAW" : "WINNER DECIDED!");
             return;
         }
@@ -662,7 +665,7 @@ public:
             if (!executionRevealed) {
                 executionRevealed = true;
                 if (!finalResult.draw) {
-                    if (auto section = winnerSection.lock()) section->runAction(CCSequence::create(
+                    if (auto section = progressSection.lock()) section->runAction(CCSequence::create(
                         CCFadeOut::create(.22f), CCHide::create(), nullptr));
                     if (auto section = actorSection.lock()) {
                         section->setVisible(true);
@@ -677,10 +680,9 @@ public:
         }
         if (!confirmationVisible) {
             confirmationVisible = true;
-            audio::play(audio::Cue::ResultReveal);
             if (auto section = actorSection.lock()) section->runAction(CCSequence::create(
                 CCFadeOut::create(.28f), CCHide::create(), nullptr));
-            if (auto section = winnerSection.lock()) section->runAction(CCSequence::create(
+            if (auto section = progressSection.lock()) section->runAction(CCSequence::create(
                 CCFadeOut::create(.28f), CCHide::create(), nullptr));
             if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.35f, 120));
             if (auto popup = resultPopup.lock()) {

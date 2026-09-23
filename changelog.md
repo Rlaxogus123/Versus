@@ -1,3 +1,9 @@
+# v0.4.15
+
+- Restore the original Versus interface styling and remove added sound cues.
+- Combine percentage comparison and winner decision into one result phase.
+- Show both player icons, names, and percentages clearly in the final result window.
+
 # v0.4.14
 
 - Remove square color-gradient overlays from rounded panels while keeping the existing layout.
