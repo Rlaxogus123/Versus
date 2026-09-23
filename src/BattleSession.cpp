@@ -18,8 +18,8 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr float RESULT_PROGRESS_TIME = 4.f;
-constexpr float RESULT_DECISION_TIME = 2.5f;
+constexpr float RESULT_PROGRESS_TIME = 2.f;
+constexpr float RESULT_DECISION_TIME = 1.25f;
 constexpr float RESULT_SUMMARY_TIME = RESULT_PROGRESS_TIME + RESULT_DECISION_TIME;
 constexpr float RESULT_EXECUTION_TIME = 4.2f;
 constexpr float RESULT_CONFIRM_TIME = 20.f;
@@ -400,7 +400,7 @@ public:
             resultLabel(progress, fmt::format("{} attempts", info.host.attemptsUsed + 1), -95.f, -113.f, 170.f, .6f);
             resultLabel(progress, fmt::format("{} attempts", info.guest.attemptsUsed + 1), 95.f, -113.f, 170.f, .6f);
         }
-        returnStatus = resultLabel(root, "Comparing progress...", 0.f, -133.f, window.width-40.f, .65f);
+        returnStatus = resultLabel(root, "", 0.f, -133.f, window.width-40.f, .65f);
         if (auto footer = returnStatus.lock()) footer->setZOrder(40);
         if (!info.draw) {
             auto const& loserState = info.winnerUid == hostProfile.uid ? info.guest : info.host;
@@ -641,7 +641,6 @@ public:
             }
         }
         if (elapsed < RESULT_SUMMARY_TIME) {
-            label(returnStatus, finalResult.draw ? "DRAW" : "WINNER DECIDED!");
             return;
         }
         if (elapsed < RESULT_CONFIRM_START) {
@@ -658,7 +657,6 @@ public:
                     }
                 }
             }
-            label(returnStatus, finalResult.draw ? "Finalizing result..." : "Finishing move...");
             return;
         }
         if (!confirmationVisible) {
@@ -676,7 +674,7 @@ public:
         }
         auto seconds = std::max(0, static_cast<int>(std::ceil(
             RESULT_CONFIRM_START + RESULT_CONFIRM_TIME - elapsed)));
-        label(returnStatus, fmt::format("Returning to the room in {}...", seconds));
+        label(returnStatus, fmt::format("Review result  |  Auto-return in {}s", seconds));
     }
     void exitAfterResult() {
         if (!active || forcingQuit || returning) return;

@@ -1,3 +1,8 @@
+# v0.4.17
+
+- Cut the progress and winner decision sequence duration in half.
+- Hide intermediate result briefing text and show only the final review countdown.
+
 # v0.4.16
 
 - Detach the previous PlayLayer before constructing a rematch, avoiding teardown re-entry with checkpoint mods.
