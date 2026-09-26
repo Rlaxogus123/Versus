@@ -62,7 +62,10 @@ jobs:
       - name: Prepare fixed all-platform filename
         if: github.ref == 'refs/heads/main'
         shell: bash
-        run: cp "${{ steps.build.outputs.build-output }}" "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode"
+        run: |
+          combined_file="$(find "${{ steps.build.outputs.build-output }}" -maxdepth 1 -type f -name '*.geode' -print -quit)"
+          test -n "$combined_file"
+          cp "$combined_file" "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode"
 
       - name: Publish rolling all-platform build
         if: github.ref == 'refs/heads/main'
