@@ -7,11 +7,16 @@
   },
   "id": "tipp7.versus",
   "name": "Versus",
-  "version": "v0.4.17",
+  "version": "v0.4.18",
   "developer": "Tipp7",
   "description": "Create two-player Versus rooms with custom rules, ready up, and compete on the same level.",
   "dependencies": {
     "geode.node-ids": ">=v1.22.0"
+  },
+  "resources": {
+    "files": [
+      "resources/sounds/*"
+    ]
   },
   "settings": {
     "firebase-api-key": {

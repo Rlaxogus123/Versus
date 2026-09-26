@@ -3,6 +3,7 @@
 #include "BattleHUD.hpp"
 #include "MapCache.hpp"
 #include "SpectatorRunner.hpp"
+#include "VersusAudio.hpp"
 #include "VersusService.hpp"
 #include <Geode/Geode.hpp>
 #include <Geode/binding/FMODAudioEngine.hpp>
@@ -18,8 +19,8 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr float RESULT_PROGRESS_TIME = 2.f;
-constexpr float RESULT_DECISION_TIME = 1.25f;
+constexpr float RESULT_PROGRESS_TIME = 1.4f;
+constexpr float RESULT_DECISION_TIME = .875f;
 constexpr float RESULT_SUMMARY_TIME = RESULT_PROGRESS_TIME + RESULT_DECISION_TIME;
 constexpr float RESULT_EXECUTION_TIME = 4.2f;
 constexpr float RESULT_CONFIRM_TIME = 20.f;
@@ -151,6 +152,7 @@ public:
     void beginSession(PlayLayer* layer) {
         auto const& room = Service::get().room();
         if (!room || !room->battle || !room->guest) return;
+        audio::stopResultMusic();
         ++generation;
         // Never swap a live Geode WeakRef from an old PlayLayer to a new one.
         // Its controller releases the old layer while checking the new target,
@@ -219,6 +221,7 @@ public:
         active = false;
         reporting = false;
         play = nullptr;
+        audio::stopResultMusic();
     }
     void death(PlayLayer* layer) {
         if (!owns(layer) || releasing || startingTurn || !local.inAttempt || blocked()) return;
@@ -481,6 +484,13 @@ public:
                 CCEaseSineIn::create(CCMoveBy::create(1.05f, {direction * 135.f, -85.f})),
                 CCEaseSineIn::create(CCScaleTo::create(1.05f, .08f)), nullptr), nullptr));
 
+            root->runAction(CCSequence::create(
+                CCDelayTime::create(executionStart),
+                CallFuncExt::create([] { audio::play(audio::Cue::Throw); }), nullptr));
+            root->runAction(CCSequence::create(
+                CCDelayTime::create(impactDelay),
+                CallFuncExt::create([] { audio::play(audio::Cue::Blast); }), nullptr));
+
             // Move and tilt the full actor layer as a camera rig.
             actors->runAction(CCSequence::create(
                 CCDelayTime::create(executionStart - .25f),
@@ -582,7 +592,9 @@ public:
         else owner->addChild(root, 100010);
         resultRoot = root;
         resultVisible = true;
-        progress->runAction(CCFadeIn::create(.6f));
+        audio::play(audio::Cue::Finish);
+        audio::startResultMusic();
+        progress->runAction(CCFadeIn::create(.42f));
     }
     float resultElapsed() const {
         return std::chrono::duration<float>(Clock::now() - resultBegan).count();
@@ -629,8 +641,8 @@ public:
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
-            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.3f, 65));
-            if (auto banner = decisionBanner.lock()) banner->runAction(CCFadeIn::create(.55f));
+            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.21f, 65));
+            if (auto banner = decisionBanner.lock()) banner->runAction(CCFadeIn::create(.385f));
             if (!finalResult.draw) if (auto result = resultRoot.lock()) {
                 auto window = CCDirector::sharedDirector()->getWinSize();
                 float const winnerX = finalResult.winnerUid == hostProfile.uid ? -95.f : 95.f;
@@ -680,6 +692,7 @@ public:
         if (!active || forcingQuit || returning) return;
         auto quit = [this] {
             forcingQuit = true; mainMenu = leaving;
+            audio::stopResultMusic();
             auto owner = play.lock();
             if (leaving) Service::get().leaveRoom([](bool, std::string) {});
             if (owner) owner->onQuit();
@@ -717,7 +730,7 @@ public:
     }
     void update(float dt) override {
         if (!active) return;
-        auto owner = play.lock(); if (!owner) { active = false; return; }
+        auto owner = play.lock(); if (!owner) { audio::stopResultMusic(); active = false; return; }
         returnRetry -= dt;
         if (finished || leaving) {
             auto elapsed = resultElapsed();

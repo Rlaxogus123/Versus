@@ -1,3 +1,10 @@
+# v0.4.18
+
+- Block Versus entry when a newer indexed version is available.
+- Improve room rule readability and add clear Practice ON/OFF colors.
+- Speed up result progress and winner reveal timing.
+- Restore Ready cues and add randomized finish, result BGM, throw, and blast sounds.
+
 # v0.4.17
 
 - Cut the progress and winner decision sequence duration in half.
