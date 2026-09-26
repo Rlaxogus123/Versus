@@ -1,3 +1,9 @@
+# v0.4.19
+
+- Lengthen the result percentage and winner decision phases by 30%.
+- Use Geometry Dash fragments, sparkles, shockwaves, and projectile trails for victory and execution effects.
+- Replace opaque in-game player cards with mirrored white-to-transparent gradients.
+
 # v0.4.18
 
 - Block Versus entry when a newer indexed version is available.

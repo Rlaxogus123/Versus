@@ -10,6 +10,7 @@
 #include <Geode/binding/PlayLayer.hpp>
 #include <Geode/binding/PauseLayer.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
+#include <Geode/binding/CCCircleWave.hpp>
 #include <Geode/binding/UILayer.hpp>
 #include <algorithm>
 #include <chrono>
@@ -19,8 +20,9 @@ using namespace geode::prelude;
 namespace versus::battle {
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr float RESULT_PROGRESS_TIME = 1.4f;
-constexpr float RESULT_DECISION_TIME = .875f;
+constexpr float RESULT_REVEAL_TIME_SCALE = 1.3f;
+constexpr float RESULT_PROGRESS_TIME = 1.4f * RESULT_REVEAL_TIME_SCALE;
+constexpr float RESULT_DECISION_TIME = .875f * RESULT_REVEAL_TIME_SCALE;
 constexpr float RESULT_SUMMARY_TIME = RESULT_PROGRESS_TIME + RESULT_DECISION_TIME;
 constexpr float RESULT_EXECUTION_TIME = 4.2f;
 constexpr float RESULT_CONFIRM_TIME = 20.f;
@@ -34,6 +36,86 @@ SimplePlayer* icon(PlayerProfile const& profile, float scale = .85f) {
     result->setGlowOutline(ccWHITE);
     result->setScale(scale);
     return result;
+}
+
+// Use GD's square fragments and star textures, with bounded one-shot emitters.
+CCParticleSystemQuad* nativeBurst(CCNode* parent, CCPoint position, char const* preset,
+    ccColor3B tint, unsigned count, float duration, float life, float speed, float size) {
+    auto* particles = CCParticleSystemQuad::create(preset, false);
+    if (!particles) return nullptr;
+    particles->setTotalParticles(count);
+    particles->setEmitterMode(kCCParticleModeGravity);
+    particles->setPositionType(kCCPositionTypeGrouped);
+    particles->setSourcePosition({0.f, 0.f});
+    particles->setPosition(position);
+    particles->setPosVar({4.f, 4.f});
+    particles->setDuration(duration);
+    particles->setLife(life);
+    particles->setLifeVar(life * .25f);
+    particles->setEmissionRate(static_cast<float>(count) / duration);
+    particles->setAngle(90.f);
+    particles->setAngleVar(180.f);
+    particles->setSpeed(speed);
+    particles->setSpeedVar(speed * .3f);
+    particles->setGravity({0.f, -35.f});
+    particles->setStartSize(size);
+    particles->setStartSizeVar(size * .3f);
+    particles->setEndSize(0.f);
+    particles->setEndSizeVar(0.f);
+    particles->setStartColor({tint.r / 255.f, tint.g / 255.f, tint.b / 255.f, 1.f});
+    particles->setStartColorVar({.08f, .08f, .08f, 0.f});
+    particles->setEndColor({tint.r / 255.f, tint.g / 255.f, tint.b / 255.f, 0.f});
+    particles->setEndColorVar({0.f, 0.f, 0.f, 0.f});
+    particles->setBlendAdditive(true);
+    particles->setAutoRemoveOnFinish(true);
+    parent->addChild(particles, 16);
+    particles->resetSystem();
+    return particles;
+}
+
+void nativeWave(CCNode* parent, CCPoint position, ccColor3B tint, float radius) {
+    if (auto* wave = CCCircleWave::create(8.f, radius, .4f, false, true)) {
+        wave->m_color = tint;
+        wave->setPosition(position);
+        parent->addChild(wave, 15);
+    }
+}
+
+void winnerEffect(CCNode* parent, CCPoint position, PlayerProfile const& player) {
+    auto tint = color(player.color1);
+    tint = ccc3((tint.r + 255) / 2, (tint.g + 255) / 2, (tint.b + 255) / 2);
+    nativeWave(parent, position, tint, 66.f);
+    nativeBurst(parent, position, "explodeEffect.plist", tint, 52, .06f, .5f, 105.f, 5.f);
+    nativeBurst(parent, position, "glitterEffectIcon.plist", ccc3(255, 228, 135),
+        20, .16f, .65f, 45.f, 10.f);
+}
+
+void impactEffect(CCNode* parent, CCPoint position, ccColor3B tint) {
+    nativeWave(parent, position, ccWHITE, 80.f);
+    nativeBurst(parent, position, "explodeEffect.plist", tint, 64, .06f, .48f, 185.f, 7.f);
+    nativeBurst(parent, position, "glitterEffectIcon.plist", ccWHITE, 20, .08f, .4f, 110.f, 9.f);
+    parent->runAction(CCSequence::create(CCDelayTime::create(.09f),
+        CallFuncExt::create([parent, position, tint] { nativeWave(parent, position, tint, 58.f); }), nullptr));
+}
+
+void projectileTrail(CCNode* shot, float direction, ccColor3B tint) {
+    if (auto* particles = nativeBurst(shot, {0.f, 0.f}, "fireballEffect.plist", tint,
+            32, .44f, .2f, 35.f, 5.f)) {
+        particles->setPositionType(kCCPositionTypeFree);
+        particles->setAngle(direction > 0.f ? 180.f : 0.f);
+        particles->setAngleVar(25.f);
+        particles->setGravity({0.f, 0.f});
+        particles->setZOrder(-1);
+    }
+}
+
+CCSprite* projectileSprite(char const* frame, ccColor3B tint) {
+    auto* sprite = CCSprite::createWithSpriteFrameName(frame);
+    if (!sprite) sprite = CCSprite::create("square.png");
+    sprite->setColor(tint);
+    auto const size = sprite->getContentSize();
+    sprite->setScale(26.f / std::max(1.f, std::max(size.width, size.height)));
+    return sprite;
 }
 class Session final : public CCNode {
 public:
@@ -435,18 +517,21 @@ public:
             float impactDelay = executionStart + .48f;
             if (variant == 0) {
                 // Fast fireball with recoil.
-                auto* shot = CCDrawNode::create();
-                shot->drawDot({0.f, 0.f}, 12.f, {1.f, .22f, .06f, .92f});
-                shot->drawDot({0.f, 0.f}, 6.f, {1.f, .94f, .34f, 1.f});
+                auto* shot = CCNode::create();
+                shot->addChild(projectileSprite("fireball_01_001.png", ccc3(255, 193, 82)));
                 shot->setPosition(winner->getPosition());
                 shot->setScale(.2f);
+                shot->setVisible(false);
                 actors->addChild(shot, 4);
                 impactDelay = executionStart + .48f;
                 shot->runAction(CCSequence::create(CCDelayTime::create(executionStart),
+                    CCShow::create(),
+                    CallFuncExt::create([shot, direction] {
+                        projectileTrail(shot, direction, ccc3(255, 157, 65));
+                    }),
                     CCSpawn::create(
                         CCEaseSineIn::create(CCMoveBy::create(.48f, {direction * 190.f, 0.f})),
-                        CCEaseBackOut::create(CCScaleTo::create(.30f, 1.25f)),
-                        CCRotateBy::create(.48f, direction * 270.f), nullptr),
+                        CCEaseBackOut::create(CCScaleTo::create(.30f, 1.25f)), nullptr),
                     CCRemoveSelf::create(), nullptr));
                 winner->runAction(CCSequence::create(CCDelayTime::create(executionStart - .28f),
                     CCSpawn::create(CCRotateTo::create(.28f, -direction * 22.f),
@@ -459,15 +544,20 @@ public:
                 // Three staggered energy spikes cross the frame.
                 impactDelay = executionStart + .58f;
                 for (int i = -1; i <= 1; ++i) {
-                    auto* shot = CCDrawNode::create();
-                    CCPoint spike[] = {{direction * 17.f, 0.f}, {-direction * 11.f, 9.f},
-                        {-direction * 7.f, 0.f}, {-direction * 11.f, -9.f}};
-                    shot->drawPolygon(spike, 4, {.56f, .88f, 1.f, 1.f}, 1.4f, {1.f, 1.f, 1.f, 1.f});
+                    auto* shot = CCNode::create();
+                    auto* spike = projectileSprite("spike_01_001.png", ccc3(144, 224, 255));
+                    spike->setRotation(direction * 90.f);
+                    shot->addChild(spike);
                     shot->setPosition(winner->getPosition() + CCPoint{0.f, i * 16.f});
                     shot->setScale(.35f);
+                    shot->setVisible(false);
                     actors->addChild(shot, 4);
                     shot->runAction(CCSequence::create(
                         CCDelayTime::create(executionStart + (i + 1) * .07f),
+                        CCShow::create(),
+                        CallFuncExt::create([shot, direction] {
+                            projectileTrail(shot, direction, ccc3(126, 217, 255));
+                        }),
                         CCSpawn::create(
                             CCEaseSineIn::create(CCMoveBy::create(.44f, {direction * 190.f, 0.f})),
                             CCEaseBackOut::create(CCScaleTo::create(.25f, 1.f)), nullptr),
@@ -516,16 +606,12 @@ public:
                 CCDelayTime::create(impactDelay),
                 CCFadeTo::create(.045f, 195),
                 CCFadeTo::create(.20f, 0), nullptr));
-            auto* impact = CCParticleExplosion::create();
-            impact->setTotalParticles(120);
-            impact->setPosition(loser->getPosition());
-            impact->setVisible(false);
-            actors->addChild(impact, 29);
-            impact->runAction(CCSequence::create(
+            auto const impactPosition = loser->getPosition();
+            auto const impactTint = variant == 0 ? ccc3(255, 177, 70) : ccc3(125, 220, 255);
+            actors->runAction(CCSequence::create(
                 CCDelayTime::create(impactDelay),
-                CallFuncExt::create([impact] {
-                    impact->setVisible(true);
-                    impact->resetSystem();
+                CallFuncExt::create([actors, impactPosition, impactTint] {
+                    impactEffect(actors, impactPosition, impactTint);
                 }), nullptr));
         }
         auto* popup = CCNodeRGBA::create();
@@ -610,7 +696,8 @@ public:
             remaining = 1.f - (elapsed - RESULT_CONFIRM_START) / RESULT_CONFIRM_TIME;
         if (auto bar = resultTimerFill.lock())
             bar->setContentSize({resultTimerWidth * std::clamp(remaining, 0.f, 1.f), 2.f});
-        float const lerpAmount = std::clamp(dt * 8.f, 0.f, 1.f);
+        float const lerpAmount = std::clamp(
+            -std::expm1(-8.f * std::max(0.f, dt) / RESULT_REVEAL_TIME_SCALE), 0.f, 1.f);
         displayedHostPercent = std::lerp(displayedHostPercent,
             static_cast<float>(finalResult.host.bestPercent), lerpAmount);
         displayedGuestPercent = std::lerp(displayedGuestPercent,
@@ -641,15 +728,15 @@ public:
         if (elapsed < RESULT_PROGRESS_TIME) return;
         if (!winnerRevealed) {
             winnerRevealed = true;
-            if (auto curtain = transitionShade.lock()) curtain->runAction(CCFadeTo::create(.21f, 65));
-            if (auto banner = decisionBanner.lock()) banner->runAction(CCFadeIn::create(.385f));
+            if (auto curtain = transitionShade.lock())
+                curtain->runAction(CCFadeTo::create(.21f * RESULT_REVEAL_TIME_SCALE, 65));
+            if (auto banner = decisionBanner.lock())
+                banner->runAction(CCFadeIn::create(.385f * RESULT_REVEAL_TIME_SCALE));
             if (!finalResult.draw) if (auto result = resultRoot.lock()) {
                 auto window = CCDirector::sharedDirector()->getWinSize();
                 float const winnerX = finalResult.winnerUid == hostProfile.uid ? -95.f : 95.f;
-                auto* burst = CCParticleExplosion::create();
-                burst->setTotalParticles(120);
-                burst->setPosition({window.width / 2.f + winnerX, window.height / 2.f + 5.f});
-                result->addChild(burst, 16);
+                winnerEffect(result.data(), {window.width / 2.f + winnerX, window.height / 2.f - 10.f},
+                    finalResult.winnerUid == hostProfile.uid ? hostProfile : guestProfile);
             }
         }
         if (elapsed < RESULT_SUMMARY_TIME) {

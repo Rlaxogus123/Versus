@@ -56,15 +56,13 @@ struct Card {
         root->setContentSize({width, height});
         parent->addChild(root);
 
-        auto* background = CCLayerColor::create(ccc4(5, 18, 38, 225));
+        // Fade from the outer/top corner into gameplay, like GD's chest glow.
+        auto* background = CCLayerGradient::create(
+            ccc4(255, 255, 255, 100), ccc4(255, 255, 255, 0),
+            {mirrored ? -1.f : 1.f, -1.f});
         background->setContentSize({width, height});
+        background->setID("status-glow"_spr);
         root->addChild(background);
-        auto* border = CCDrawNode::create();
-        CCPoint outline[] = {{1.f, 1.f}, {width - 1.f, 1.f},
-            {width - 1.f, height - 1.f}, {1.f, height - 1.f}};
-        border->drawPolygon(outline, 4, {0.f, 0.f, 0.f, 0.f}, 1.2f,
-            {.48f, .78f, .96f, .95f});
-        root->addChild(border);
 
         float const iconX = mirrored ? width - 25.f : 25.f;
 
