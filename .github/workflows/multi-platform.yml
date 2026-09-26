@@ -6,6 +6,9 @@ on:
     branches:
       - "**"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -17,6 +20,10 @@ jobs:
 
           - name: macOS
             os: macos-latest
+
+          - name: iOS
+            os: macos-latest
+            target: iOS
 
           - name: Android32
             os: ubuntu-latest
@@ -51,3 +58,18 @@ jobs:
         with:
           name: Build Output
           path: ${{ steps.build.outputs.build-output }}
+
+      - name: Prepare fixed all-platform filename
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: cp "${{ steps.build.outputs.build-output }}" "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode"
+
+      - name: Publish rolling all-platform build
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view all-platform-latest >/dev/null 2>&1 || \
+            gh release create all-platform-latest --prerelease --title "Latest All-Platform Build" --notes "Automatically updated from main."
+          gh release upload all-platform-latest "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode" --clobber
