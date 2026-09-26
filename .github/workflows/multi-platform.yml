@@ -73,6 +73,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view all-platform-latest >/dev/null 2>&1 || \
-            gh release create all-platform-latest --prerelease --title "Latest All-Platform Build" --notes "Automatically updated from main."
-          gh release upload all-platform-latest "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode" --clobber
+          gh release view all-platform-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create all-platform-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Latest All-Platform Build" --notes "Automatically updated from main."
+          gh release upload all-platform-latest "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode" --repo "$GITHUB_REPOSITORY" --clobber
