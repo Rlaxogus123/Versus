@@ -7,6 +7,12 @@ class MapSelectionPopup final : public Popup {
     CCMenuItemSpriteExtra* m_type = nullptr;
     CCMenuItemSpriteExtra* m_apply = nullptr;
     std::vector<CCMenuItemSpriteExtra*> m_difficulties;
+    std::vector<CCSprite*> m_checks;
+    std::vector<CCLabelBMFont*> m_names;
+    struct StarChoice { int category, bit; CCMenuItemSpriteExtra* item; CCLabelBMFont* text; };
+    std::vector<StarChoice> m_stars;
+    CCLabelBMFont* m_hint = nullptr;
+    CCLabelBMFont* m_manualHint = nullptr;
     void refresh() {
         auto tint = [](CCMenuItemSpriteExtra* item, bool selected) {
             auto* sprite = static_cast<ButtonSprite*>(item->getNormalImage());
@@ -14,33 +20,81 @@ class MapSelectionPopup final : public Popup {
         };
         tint(m_manual, !m_selection.random); tint(m_random, m_selection.random);
         for (int i = 0; i < 10; ++i) {
-            tint(m_difficulties[i], m_selection.difficulty == i);
+            bool selected = (m_selection.mask & CATEGORY_MASKS[i]) != 0;
+            auto* face = static_cast<CCSprite*>(m_difficulties[i]->getNormalImage());
+            face->setColor(selected ? ccWHITE : ccc3(125, 125, 125));
+            m_checks[i]->setVisible(selected);
+            m_names[i]->setColor(selected ? ccc3(110, 255, 140) : kMuted);
+            m_difficulties[i]->setVisible(m_selection.random);
+            m_names[i]->setVisible(m_selection.random);
             enabled(m_difficulties[i], m_selection.random && !m_pending);
         }
+        for (auto const& choice : m_stars) {
+            bool visible = m_selection.random && (m_selection.mask & CATEGORY_MASKS[choice.category]);
+            choice.item->setVisible(visible); choice.text->setVisible(visible);
+            choice.item->setEnabled(visible && !m_pending);
+            auto* sprite = CCSprite::createWithSpriteFrameName((m_selection.mask & choice.bit) ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png");
+            sprite->setScale(.43f); choice.item->setSprite(sprite);
+        }
         auto* type = static_cast<ButtonSprite*>(m_type->getNormalImage());
-        type->setString(m_selection.platformer ? "Platformer" : "Classic (Non-Platformer)");
+        type->setString(m_selection.platformer ? "Platformer" : "Classic");
+        m_type->updateSprite(); m_type->setVisible(m_selection.random);
+        auto* applySprite = ButtonSprite::create(m_selection.random ? "Apply" : "Search Map ..", "goldFont.fnt", "GJ_button_01.png");
+        applySprite->setScale(.57f); m_apply->setSprite(applySprite);
+        m_apply->setPosition({m_selection.random ? 354.f : 240.f, 29.f});
+        m_hint->setVisible(m_selection.random); m_manualHint->setVisible(!m_selection.random);
         enabled(m_type, m_selection.random && !m_pending);
-        enabled(m_apply, !m_pending); enabled(m_manual, !m_pending); enabled(m_random, !m_pending);
+        enabled(m_apply, !m_pending && validSelection(m_selection));
+        enabled(m_manual, !m_pending); enabled(m_random, !m_pending);
     }
     bool setup(RoomInfo const& room) {
-        if (!Popup::init(420.f, 285.f, "GJ_square02.png")) return false;
+        if (!Popup::init(480.f, 310.f, "GJ_square02.png")) return false;
         m_selection = room.mapSelection; m_roomID = room.id;
         setTitle("Map Mode", "bigFont.fnt", .65f);
-        m_manual = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onManual), "Map Select", {115.f, 235.f}, .6f);
-        m_random = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onRandom), "Random Map", {305.f, 235.f}, .6f);
-        label(m_mainLayer, "Rated maps only - choose a difficulty", {210.f, 204.f}, .52f, 390.f, kIce, false, "chatFont.fnt");
+        m_manual = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onManual), "Map Select", {132.f, 258.f}, .6f);
+        m_random = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onRandom), "Random Map", {348.f, 258.f}, .6f);
+        m_hint = label(m_mainLayer, "Rated only | Multi-select faces, then check stars", {240.f, 232.f}, .55f, 444.f, kIce, false, "chatFont.fnt");
+        m_manualHint = label(m_mainLayer, "Choose a map using the GD search", {240.f, 159.f}, .6f, 420.f, kIce, false, "chatFont.fnt");
         for (int i = 0; i < 10; ++i) {
-            auto* item = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onDifficulty), RANDOM_DIFFICULTIES[i],
-                {110.f + (i / 5) * 200.f, 177.f - (i % 5) * 25.f}, .46f);
+            float const x = 54.f + (i % 5) * 93.f;
+            float const y = i < 5 ? 201.f : 119.f;
+            auto* face = GJDifficultySprite::create(CATEGORY_FACES[i], GJDifficultyName::Short);
+            face->setScale(.88f);
+            auto* item = CCMenuItemSpriteExtra::create(face, this, menu_selector(MapSelectionPopup::onDifficulty));
+            item->m_scaleMultiplier = 1.1f; item->setPosition({x, y}); m_buttonMenu->addChild(item);
             item->setTag(i); m_difficulties.push_back(item);
+            auto* check = CCSprite::createWithSpriteFrameName("GJ_checkOn_001.png");
+            check->setScale(.36f); check->setPosition({face->getContentSize().width - 1.f, face->getContentSize().height - 2.f});
+            face->addChild(check); m_checks.push_back(check);
+            std::string name = RANDOM_DIFFICULTIES[i];
+            if (i >= 5) name.replace(name.find(' '), 1, "\n");
+            m_names.push_back(label(m_mainLayer, name, {x, y - 29.f}, .29f, 86.f));
+            int bits = CATEGORY_MASKS[i];
+            int count = std::popcount(static_cast<unsigned>(bits)), column = 0;
+            for (int bitIndex = 0; bitIndex < 13; ++bitIndex) if (bits & (1 << bitIndex)) {
+                float const start = x - (count == 2 ? 28.f : 10.f) + column++ * 37.f;
+                float const starY = i < 5 ? 148.f : 64.f;
+                auto* box = CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png"); box->setScale(.43f);
+                auto* option = CCMenuItemSpriteExtra::create(box, this, menu_selector(MapSelectionPopup::onStar));
+                option->setPosition({start, starY}); option->setTag(1 << bitIndex); option->m_scaleMultiplier = 1.1f;
+                m_buttonMenu->addChild(option);
+                auto* text = label(m_mainLayer, fmt::format("{}*", bitIndex < 8 ? bitIndex + 2 : 10), {start + 16.f, starY}, .27f, 24.f);
+                m_stars.push_back({i, 1 << bitIndex, option, text});
+            }
         }
-        m_type = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onType), "Classic (Non-Platformer)", {210.f, 49.f}, .48f);
-        m_apply = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onApply), "Apply", {210.f, 18.f}, .5f);
+        m_type = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onType), "Classic", {126.f, 29.f}, .52f);
+        m_apply = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onApply), "Apply", {354.f, 29.f}, .57f);
         refresh(); return true;
     }
     void onManual(CCObject*) { m_selection.random = false; refresh(); }
     void onRandom(CCObject*) { m_selection.random = true; refresh(); }
-    void onDifficulty(CCObject* sender) { m_selection.difficulty = static_cast<CCNode*>(sender)->getTag(); refresh(); }
+    void onDifficulty(CCObject* sender) {
+        int bits = CATEGORY_MASKS[sender->getTag()];
+        if (m_selection.mask & bits) m_selection.mask &= ~bits;
+        else m_selection.mask |= bits;
+        refresh();
+    }
+    void onStar(CCObject* sender) { m_selection.mask ^= sender->getTag(); refresh(); }
     void onType(CCObject*) { m_selection.platformer = !m_selection.platformer; refresh(); }
     void onApply(CCObject*) {
         auto const& room = Service::get().room();
@@ -87,11 +141,12 @@ class MapRoulettePopup final : public Popup {
         for (auto const& level : m_draw.levels) {
             auto* card = panel(clip, {}, {134.f, 100.f}, false);
             auto* face = GJDifficultySprite::create(std::clamp(level.difficulty, 0, 10), GJDifficultyName::Short);
-            if (face) { face->setPosition({67.f, 70.f}); face->setScale(.7f); card->addChild(face); }
-            label(card, level.name, {67.f, 38.f}, .42f, 124.f);
-            label(card, fmt::format("{}", level.stars), {60.f, 15.f}, .4f, 34.f, ccc3(255, 220, 100));
+            if (face) { face->setPosition({67.f, 76.f}); face->setScale(.65f); card->addChild(face); }
+            label(card, level.name, {67.f, 47.f}, .39f, 124.f);
+            label(card, level.creator.empty() ? "Unknown creator" : level.creator, {67.f, 29.f}, .36f, 122.f, ccWHITE, false, "goldFont.fnt");
+            label(card, fmt::format("{}", level.stars), {60.f, 11.f}, .36f, 34.f, ccc3(255, 220, 100));
             auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
-            if (star) { star->setPosition({78.f, 15.f}); star->setScale(.6f); card->addChild(star); }
+            if (star) { star->setPosition({78.f, 11.f}); star->setScale(.6f); card->addChild(star); }
             m_cards.push_back(card);
         }
         label(m_mainLayer, "v", {220.f, 180.f}, .55f, 30.f, ccc3(255, 220, 100));

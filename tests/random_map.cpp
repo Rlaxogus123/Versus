@@ -15,7 +15,7 @@ int main() {
     for (bool actualType : {false, true})
     for (int stars = 0; stars <= 11; ++stars)
     for (int difficulty = 1; difficulty <= 10; ++difficulty) {
-        MapSelection filter{true, category, platformer};
+        MapSelection filter{true, CATEGORY_MASKS[category], platformer};
         LevelInfo level{123, "Test", difficulty, stars, difficulty >= 6, false, actualType};
         int lows[] = {2, 3, 5, 6, 8}, highs[] = {2, 4, 5, 7, 9};
         int demonTiers[] = {7, 8, 6, 9, 10};
@@ -29,13 +29,26 @@ int main() {
     }
     LevelInfo valid{123, "Test", 1, 2};
     check(!matchesRandomMap(valid, {true, -1, false}), "invalid category");
-    check(!matchesRandomMap(valid, {true, 10, false}), "invalid category");
+    check(!matchesRandomMap(valid, {true, 8192, false}), "invalid mask");
+    check(!validSelection({true, 0, false}), "empty random selection");
+    check(validSelection({false, 0, false}), "manual mode needs no filter");
+    for (int mask = 1; mask <= ALL_MAP_CHOICES; ++mask) {
+        MapSelection filter{true, mask, false};
+        for (int bit = 0; bit < 13; ++bit) {
+            LevelInfo sample{123, "Test", bit < 8 ? 3 : CATEGORY_FACES[bit - 3], bit < 8 ? bit + 2 : 10, bit >= 8};
+            check(matchesRandomMap(sample, filter) == ((mask & (1 << bit)) != 0), "OR/star selection mismatch");
+            ++checks;
+        }
+    }
+    auto queries = randomMapQueries({true, 4 | 8 | 256 | 2048, false});
+    check(queries.size() == 3, "4/5 stars share one native search");
+    check(queries[0].difficulty == 3 && queries[1].demonFilter == 1 && queries[2].demonFilter == 4, "native OR queries");
     valid.id = 0;
-    check(!matchesRandomMap(valid, {true, 0, false}), "invalid ID");
+    check(!matchesRandomMap(valid, {true, 1, false}), "invalid ID");
     valid.id = 1; valid.name.clear();
-    check(!matchesRandomMap(valid, {true, 0, false}), "empty name");
+    check(!matchesRandomMap(valid, {true, 1, false}), "empty name");
     valid.name.assign(65, 'x');
-    check(!matchesRandomMap(valid, {true, 0, false}), "oversize name");
+    check(!matchesRandomMap(valid, {true, 1, false}), "oversize name");
     for (int count = 2; count <= 10; ++count) for (int winner = 0; winner < count; ++winner) {
         double last = 0;
         for (int64_t elapsed = -1000; elapsed <= DRAW_END_MS + 2000; elapsed += 7) {

@@ -1209,14 +1209,16 @@ class RoomLayer : public SceneLayer {
             room.level.name, room.level.difficulty, room.level.stars, room.level.demon,
             room.level.autoLevel, room.started, m_pending, Service::get().busy(), room.guestReady, launchKey,
             room.hostReady, rulesText(room.rules), m_cached, m_downloading, m_cacheError) +
-            fmt::format(":{}:{}:{}:{}:{}", room.mapSelection.random, room.mapSelection.difficulty,
+            fmt::format(":{}:{}:{}:{}:{}", room.mapSelection.random, room.mapSelection.mask,
                 room.mapSelection.platformer, room.mapDraw ? room.mapDraw->id : "", room.mapDraw && room.mapDraw->settled) +
+            fmt::format(":{}:{}:{}", room.level.creator, roomWins(room, true), roomWins(room, false)) +
             (room.battle ? fmt::format(":{}:{}:{}", room.battle->finishedAt, room.battle->hostReturned, room.battle->guestReturned) : "");
     }
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
-        CCPoint origin, CCSize size, bool mine, bool host, bool ready, bool checkingResult = false) {
+        CCPoint origin, CCSize size, bool host, bool ready, int wins, bool checkingResult = false) {
         auto* card = panel(parent, origin, size, false);
-        label(card, mine ? "YOU" : "OPPONENT", {size.width / 2.f, size.height - 13.f}, .29f, size.width - 12.f, kIce);
+        label(card, fmt::format("Win : {}", wins), {size.width / 2.f, size.height - 13.f}, .60f, size.width - 12.f,
+            ccWHITE, false, "goldFont.fnt");
         if (profile) {
             if (checkingResult) {
                 label(card, "CHECKING RESULT...", {size.width / 2.f, size.height - 46.f},
@@ -1287,11 +1289,11 @@ class RoomLayer : public SceneLayer {
         if (!mine) mine = Service::get().profile();
         bool const myReady = host ? room.hostReady : room.guestReady;
         bool const opponentReady = host ? room.guestReady : room.hostReady;
-        playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, true, host, myReady);
+        playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, host, myReady, roomWins(room, host));
         bool const opponentChecking = room.battle && room.battle->finishedAt > 0 &&
             (host ? !room.battle->guestReturned : !room.battle->hostReturned);
         playerCard(frame, opponent, {width - cardWidth - 12.f, 48.f}, {cardWidth, cardHeight},
-            false, !host, opponentReady, opponentChecking);
+            !host, opponentReady, roomWins(room, !host), opponentChecking);
         float const centerWidth = width - 2.f * cardWidth - 40.f;
         float const centerX = width / 2.f;
         // The native sprite's NA/Auto values are reversed from GJDifficulty.
@@ -1306,15 +1308,17 @@ class RoomLayer : public SceneLayer {
         label(frame, room.level.id ? room.level.name : room.mapSelection.random ? "Random Map" : "Choose a map",
             {centerX, height - 114.f}, .45f, centerWidth);
         if (room.level.id) {
+            label(frame, room.level.creator.empty() ? "Unknown creator" : room.level.creator,
+                {centerX, height - 132.f}, .42f, centerWidth, ccWHITE, false, "goldFont.fnt");
             auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
             if (star) {
                 star->setScale(.75f);
-                star->setPosition({centerX + 15.f, height - 134.f});
+                star->setPosition({centerX + 15.f, height - 150.f});
                 frame->addChild(star);
             }
-            label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 134.f}, .40f, 40.f, ccc3(255, 230, 130));
+            label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 150.f}, .36f, 40.f, ccc3(255, 230, 130));
         } else {
-            label(frame, room.mapSelection.random ? RANDOM_DIFFICULTIES[std::clamp(room.mapSelection.difficulty, 0, 9)] : "A map for your duel", {centerX, height - 135.f}, .39f,
+            label(frame, room.mapSelection.random ? selectionSummary(room.mapSelection) : "A map for your duel", {centerX, height - 135.f}, .39f,
                 centerWidth, kMuted, false, "chatFont.fnt");
         }
         auto* actions = menu(frame);

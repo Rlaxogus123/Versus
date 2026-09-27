@@ -1021,6 +1021,8 @@ try {
         }
     }
 
+    . (Join-Path $PSScriptRoot 'firebase-map-score.ps1')
+
     $history = @{}
     for ($i = 1; $i -le 12; $i++) {
         $history["match$i"] = @{ playedAt = $i; opponentName = 'guest'; levelName = 'Test'; winnerName = 'host'; result = 'win' }

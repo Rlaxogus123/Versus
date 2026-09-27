@@ -26,3 +26,8 @@ add_test(NAME battle_progress COMMAND battle_progress)
 add_executable(random_map random_map.cpp)
 target_include_directories(random_map PRIVATE ../src)
 add_test(NAME random_map COMMAND random_map)
+
+add_executable(room_score room_score.cpp)
+target_include_directories(room_score PRIVATE ../src)
+target_link_libraries(room_score PRIVATE mat-json)
+add_test(NAME room_score COMMAND room_score)

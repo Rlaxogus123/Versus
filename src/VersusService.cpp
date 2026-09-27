@@ -4,6 +4,7 @@
 #include "BattleProgress.hpp"
 #include "RandomMapPolicy.hpp"
 #include "RandomMapSearch.hpp"
+#include "RoomScore.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -278,16 +279,18 @@ void resolveBattle(Json& body, std::string const& actorUid) {
 }
 LevelInfo parseLevel(Json const& value) {
     return {intAt(value, "id"), stringAt(value, "name"), static_cast<int>(intAt(value, "difficulty")),
-        static_cast<int>(intAt(value, "stars")), boolAt(value, "demon"), boolAt(value, "autoLevel"), boolAt(value, "platformer")};
+        static_cast<int>(intAt(value, "stars")), boolAt(value, "demon"), boolAt(value, "autoLevel"), boolAt(value, "platformer"), stringAt(value, "creator")};
 }
 Json levelJson(LevelInfo const& level) {
     auto value = Json::object(); value["id"] = level.id; value["name"] = level.name;
     value["difficulty"] = level.autoLevel ? -1 : level.difficulty; value["stars"] = level.stars;
     value["demon"] = level.demon; value["autoLevel"] = level.autoLevel; value["platformer"] = level.platformer;
+    value["creator"] = level.creator;
     return value;
 }
 MapSelection parseMapSelection(Json const& value) {
-    return {boolAt(value, "random"), static_cast<int>(intAt(value, "difficulty")), boolAt(value, "platformer")};
+    return {boolAt(value, "random"), value.contains("mask") ? static_cast<int>(intAt(value, "mask")) :
+        legacySelectionMask(static_cast<int>(intAt(value, "difficulty"))), boolAt(value, "platformer")};
 }
 RoomInfo parseRoom(std::string id, Json const& value) {
     RoomInfo result;
@@ -297,6 +300,9 @@ RoomInfo parseRoom(std::string id, Json const& value) {
     if (hasRoomGuest(value)) result.guest = parseProfile(value["guest"]);
     result.level = parseLevel(value["level"]);
     result.mapSelection = parseMapSelection(value["mapSelection"]);
+    result.hostWins = static_cast<int>(intAt(value["score"], "host"));
+    result.guestWins = static_cast<int>(intAt(value["score"], "guest"));
+    result.scoredMatch = stringAt(value["score"], "lastMatch");
     if (value["mapDraw"].isObject()) {
         auto const& source = value["mapDraw"];
         MapDraw draw;
@@ -557,6 +563,7 @@ void heartbeat() {
             body["hostSeen"] = timestamp();
             if (roomGuestExpired(body, nowMs(), firebase_config::PRESENCE_TIMEOUT_MS)) {
                 body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
+                resetRoomScore(body);
                 body["hostReady"] = false; body["guestReady"] = false;
                 body["launch"] = nullptr; body["battle"] = nullptr;
                 body.erase("mapDraw");
@@ -764,6 +771,7 @@ void Service::createRoom(std::string name, std::string pin, Done callback) {
                 body["rules"] = rulesJson({});
                 body["hostReady"] = false; body["guestReady"] = false;
                 body["hostEmoteAt"] = 0; body["guestEmoteAt"] = 0;
+                resetRoomScore(body);
                 request("PUT", "rooms/" + id, body, [id, epoch, callback = std::move(callback)](web::WebResponse result) mutable {
                     auto& s = state(); if (epoch != s.epoch) { callback(false, "Room session changed."); return; }
                     auto finish = [id, epoch, callback = std::move(callback)](bool success, std::string error) mutable {
@@ -796,6 +804,7 @@ void Service::joinRoom(RoomInfo room, std::string pin, Done callback) {
                 if (auto error = roomJoinError(body, uid, nowMs(), firebase_config::PRESENCE_TIMEOUT_MS); !error.empty()) return error;
                 if (stringAt(std::as_const(body)["guest"], "uid") == uid) { body["guestSeen"] = timestamp(); return {}; }
                 body["guest"] = profileJson(state().profile); body["guestSeen"] = timestamp();
+                resetRoomScore(body);
                 body["guestReady"] = false; body["guestEmoteAt"] = 0; return {};
             }, [id, epoch, callback = std::move(callback)](bool success, std::string error) mutable {
                 auto finish = [epoch, callback = std::move(callback)](bool recovered, std::string error) mutable {
@@ -832,6 +841,7 @@ void Service::leaveRoom(Done callback) {
         if (host && stringAt(std::as_const(body)["host"], "uid") == uid) body = nullptr;
         else if (!host && stringAt(std::as_const(body)["guest"], "uid") == uid) {
             body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
+            resetRoomScore(body);
             body["hostReady"] = false; body["guestReady"] = false;
             body["launch"] = nullptr; body["battle"] = nullptr;
             body.erase("mapDraw");
@@ -885,7 +895,7 @@ void Service::configureMapSelection(MapSelection selection, Done callback) {
         if (std::as_const(body)["mapDraw"].isObject() && !boolAt(std::as_const(body)["mapDraw"], "settled")) return "Wait for the roulette.";
         if (parseMapSelection(std::as_const(body)["mapSelection"]) == selection) return ROOM_UNCHANGED;
         auto config = Json::object(); config["random"] = selection.random;
-        config["difficulty"] = selection.difficulty; config["platformer"] = selection.platformer;
+        config["mask"] = selection.mask; config["platformer"] = selection.platformer;
         body["mapSelection"] = std::move(config);
         body.erase("mapDraw"); body.erase("level");
         body["hostReady"] = false; body["guestReady"] = false;
@@ -972,6 +982,7 @@ void Service::setReady(bool ready, Done callback) {
         if (drawingMap(current)) return "Wait for the roulette.";
         if (ready && ((!needsRandomDraw(current) && intAt(std::as_const(body)["level"], "id") <= 0) ||
             current.mapSelection != expectedSelection || current.level.platformer != expectedLevel.platformer ||
+            current.level.creator != expectedLevel.creator ||
             intAt(std::as_const(body)["level"], "id") != expectedLevel.id ||
             stringAt(std::as_const(body)["level"], "name") != expectedLevel.name ||
             intAt(std::as_const(body)["level"], "stars") != expectedLevel.stars ||
@@ -1152,6 +1163,7 @@ void Service::cancelLaunch(std::string launchId, Done callback) {
         if (stringAt(std::as_const(body)["launch"], "id") != launchId ||
             stringAt(std::as_const(body)["battle"], "id") != launchId) return "Match session changed.";
         bool const finished = intAt(std::as_const(body)["battle"], "finishedAt") > 0;
+        if (finished) settleRoomScore(body);
         body["started"] = false;
         body["hostReady"] = false; body["guestReady"] = false;
         body["launch"] = nullptr; body["battle"] = nullptr;

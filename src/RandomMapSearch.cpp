@@ -20,14 +20,20 @@ class RandomSearch final : public CCNode, public LevelManagerDelegate {
     using Clock = std::chrono::steady_clock;
     RandomMapsCallback callback;
     MapSelection filter;
-    std::vector<LevelInfo> candidates;
-    std::set<int> pages;
+    struct Group {
+        RandomMapQuery query;
+        std::vector<LevelInfo> candidates;
+        std::set<int> pages;
+        int total = 100, requests = 0;
+        bool exhausted() const { return requests >= 3 || pages.size() >= size_t(std::max(1, (total + 9) / 10)); }
+    };
+    std::vector<Group> groups;
+    size_t groupIndex = 0;
     std::mt19937 rng {std::random_device{}()};
     std::string roomID, key;
     Ref<GJSearchObject> search;
     Clock::time_point began, requested, next;
     bool pending = false, completed = false, failed = false;
-    int total = 100, requests = 0;
 
     bool owns(char const* value) const { return pending && value && key == value; }
     void releaseDelegate() {
@@ -39,6 +45,10 @@ class RandomSearch final : public CCNode, public LevelManagerDelegate {
         releaseDelegate();
         auto done = std::exchange(callback, {});
         search = nullptr;
+        std::vector<LevelInfo> candidates;
+        for (auto& group : groups) for (auto& level : group.candidates)
+            if (std::none_of(candidates.begin(), candidates.end(), [&](auto const& old) { return old.id == level.id; }))
+                candidates.push_back(std::move(level));
         if (error.empty() && candidates.size() < 2) error = "Not enough rated maps found. Try again or change the filter.";
         std::shuffle(candidates.begin(), candidates.end(), rng);
         if (candidates.size() > 10) candidates.resize(10);
@@ -59,9 +69,10 @@ public:
     void begin(MapSelection value, RandomMapsCallback done) {
         if (callback) { done({}, "Random map search is already running."); return; }
         auto const& room = Service::get().room();
-        if (!room || !validSelection(value)) { done({}, "Room/filter changed."); return; }
+        if (!room || !value.random || !validSelection(value)) { done({}, "Room/filter changed."); return; }
         callback = std::move(done); filter = value; roomID = room->id;
-        candidates.clear(); pages.clear(); requests = 0; total = 100;
+        groups.clear(); groupIndex = 0;
+        for (auto query : randomMapQueries(filter)) groups.push_back({query});
         completed = failed = false; began = next = Clock::now();
     }
     void setupPageInfo(gd::string info, char const* value) override {
@@ -70,10 +81,11 @@ public:
         int count = 0;
         auto end = text.find(':');
         std::from_chars(text.data(), text.data() + (end == std::string::npos ? text.size() : end), count);
-        if (count > 0) total = std::min(count, 10000);
+        if (count > 0) groups[groupIndex].total = std::min(count, 10000);
     }
     void loadLevelsFinished(CCArray* levels, char const* value) override {
         if (!owns(value) || completed) return;
+        auto& candidates = groups[groupIndex].candidates;
         if (levels) for (auto* level : CCArrayExt<GJGameLevel*>(levels)) {
             auto info = describeLevel(level);
             if (matchesRandomMap(info, filter) && std::none_of(candidates.begin(), candidates.end(),
@@ -92,43 +104,51 @@ public:
             !room->hostReady || !room->guestReady || !Service::get().isHost()) {
             finish("Room/filter changed."); return;
         }
-        if (now - began > std::chrono::seconds(45)) { finish("Level search timed out. Try again."); return; }
+        if (now - began > std::chrono::seconds(90)) { finish(); return; }
         if (completed) {
             releaseDelegate(); completed = false;
+            auto& group = groups[groupIndex];
             // Page zero discovers the result count; don't give its popular
             // maps a guaranteed place in every draw when more pages exist.
-            if (requests == 1 && total > 10) candidates.clear();
-            if (candidates.size() >= 20 || requests >= 7 || pages.size() >= size_t(std::max(1, (total + 9) / 10))) {
+            if (group.requests == 1 && group.total > 10 && !failed) group.candidates.clear();
+            if (failed) group.requests = 3; // skip unavailable tier, don't stall the other tiers
+            size_t count = 0;
+            bool allSampled = true;
+            for (auto const& item : groups) {
+                count += item.candidates.size();
+                allSampled &= item.requests >= 2 || item.exhausted();
+            }
+            if ((allSampled && count >= 20) || std::all_of(groups.begin(), groups.end(), [](auto const& g) { return g.exhausted(); })) {
                 finish(); return;
             }
-            if (failed && requests >= 3 && candidates.empty()) { finish("Unable to search rated maps. Try again."); return; }
+            do { groupIndex = (groupIndex + 1) % groups.size(); } while (groups[groupIndex].exhausted());
             failed = false; next = now + std::chrono::milliseconds(400);
         }
         if (pending) {
-            if (now - requested > std::chrono::seconds(12)) finish("Level search timed out. Try again.");
+            if (now - requested > std::chrono::seconds(12)) { completed = true; failed = true; }
             return;
         }
         auto* manager = GameLevelManager::sharedState();
         if (now < next || manager->m_levelManagerDelegate) return;
+        auto& group = groups[groupIndex];
         int page = 0;
-        if (requests) {
-            int const maxPage = std::max(0, (total - 1) / 10);
+        if (group.requests) {
+            int const maxPage = std::max(0, (group.total - 1) / 10);
             page = std::uniform_int_distribution<int>(0, maxPage)(rng);
-            for (int i = 0; pages.contains(page) && i <= maxPage; ++i) page = (page + 1) % (maxPage + 1);
+            for (int i = 0; group.pages.contains(page) && i <= maxPage; ++i) page = (page + 1) % (maxPage + 1);
         }
-        pages.insert(page);
         search = GJSearchObject::create(SearchType::MostLiked);
         search->m_page = page;
         search->m_starFilter = true;
         search->m_length = filter.platformer ? "5" : "0,1,2,3,4";
         // User's star groupings differ from GD's difficulty labels (4* and 5*
         // are both native Hard). Query broadly, then enforce exact stars above.
-        constexpr char const* difficulties[] = {"1", "2,3", "3", "4", "5", "-2", "-2", "-2", "-2", "-2"};
-        search->m_difficulty = difficulties[filter.difficulty];
-        if (filter.difficulty >= 5) search->m_demonFilter = static_cast<GJDifficulty>(filter.difficulty - 4);
+        search->m_difficulty = std::to_string(group.query.difficulty);
+        search->m_demonFilter = static_cast<GJDifficulty>(group.query.demonFilter);
         key = search->getKey();
         if (manager->isDLActive(key.c_str())) { next = now + std::chrono::seconds(1); return; }
-        pending = true; requested = now; ++requests;
+        group.pages.insert(page);
+        pending = true; requested = now; ++group.requests;
         manager->m_levelManagerDelegate = this;
         manager->getOnlineLevels(search);
     }

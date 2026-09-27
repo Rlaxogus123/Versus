@@ -10,9 +10,11 @@ Versus provides a room browser and waiting room for one-on-one matches.
 - The waiting room downloads the selected level and audio automatically. Both
   players ready independently; changing the map or rules clears both states.
 - Map Mode offers the existing native map picker or a rated-only Random Map
-  mode. Choose a star/demon tier and Classic or Platformer. Both players Ready,
+  mode. Multi-select native difficulty icons, check exact stars, and choose
+  Classic or Platformer. Selected filters are combined with OR. Both players Ready,
   then the host presses Roll: up to ten matching maps appear in a shared,
-  decelerating roulette with names, difficulty icons, stars and ticking audio.
+  decelerating roulette with names, gold-font creators, difficulty icons,
+  stars and ticking audio. Manual selection opens with Search Map .. .
   Once chosen, both clients download the map, music and SFX automatically,
   then Ready again and Start. A finished random match requires a fresh roll.
 - Random candidates are sampled from bounded random pages of GD's native
@@ -26,6 +28,9 @@ Versus provides a room browser and waiting room for one-on-one matches.
   enter, with a 60-second deadline and a shared three-second countdown.
 - Download errors, cancellation and loading timeouts return to the room.
 - Leaving as host closes the room and returns its guest to the room browser.
+- Large gold-font Win counts track this room's current pair only. Each finished
+  match counts once; draws add no wins. Rematches/map/rule changes preserve the
+  score. Guest departure or timeout clears both counters before another joins.
 - Match HUDs show both players and progress. Attempts, spectating,
   percentage ties, forced Practice, pause timeouts, forfeits, result animations,
   and recent history are synchronized through the room state.

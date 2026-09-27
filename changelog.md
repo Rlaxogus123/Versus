@@ -1,3 +1,11 @@
+# v0.5.1
+
+- Replace random-filter text buttons with native GD difficulty icons, multi-selection and per-star checkboxes.
+- Sample rated maps from the union of selected stars/demon tiers; keep Classic/Platformer filtering.
+- Use Search Map .. in manual mode and show gold-font creator names in the room and roulette.
+- Show large gold-font pair-local Win counts; count each finished match once, preserve rematches, and clear both scores when the challenger leaves or times out.
+- Update Firebase rules for exact multi-filters, creator metadata and validated score settlement. Publish the updated rules before playing with this version.
+
 # v0.5.0
 
 - Add manual/random map modes, exact star/demon-tier filters, and Classic/Platformer filtering for rated maps.

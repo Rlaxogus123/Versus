@@ -117,6 +117,8 @@ LevelInfo describeLevel(GJGameLevel* level) {
     versus::LevelInfo info;
     info.id = level->m_levelID.value();
     info.name = std::string(level->m_levelName);
+    info.creator = std::string(level->m_creatorName);
+    if (info.creator.size() > 32) info.creator.resize(32);
     info.stars = level->m_stars.value();
     info.demon = level->m_demon.value() != 0;
     info.autoLevel = level->m_autoLevel;

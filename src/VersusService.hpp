@@ -25,11 +25,12 @@ struct LevelInfo {
     bool demon = false;
     bool autoLevel = false;
     bool platformer = false;
+    std::string creator;
     bool operator==(LevelInfo const&) const = default;
 };
 struct MapSelection {
     bool random = false;
-    int difficulty = 0; // 2*, 3-4*, 5*, 6-7*, 8-9*, then five demon tiers
+    int mask = 1; // bits 0..7: 2..9 stars; bits 8..12: five demon tiers
     bool platformer = false;
     bool operator==(MapSelection const&) const = default;
 };
@@ -110,6 +111,8 @@ struct RoomInfo {
     LevelInfo level;
     MapSelection mapSelection;
     std::optional<MapDraw> mapDraw;
+    int hostWins = 0, guestWins = 0;
+    std::string scoredMatch;
     GameRules rules;
     bool hostReady = false;
     bool guestReady = false;
