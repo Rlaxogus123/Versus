@@ -41,7 +41,7 @@ class Packaging(unittest.TestCase):
                 self.fixture(platform, edition)
 
     def fixture(self, platform, edition, *, actual_edition=None, sound=b'sound',
-                version='v0.5.3', apple=False, corrupt_arch=False):
+                version='v0.5.3', apple=False, corrupt_arch=False, notes=b'Notes\nText\n'):
         folder = self.artifacts / f'geode-{platform}-{edition}'
         folder.mkdir(parents=True, exist_ok=True)
         name = packager.BINARIES[platform]
@@ -53,6 +53,7 @@ class Packaging(unittest.TestCase):
             archive.writestr('mod.json', json.dumps({
                 'id': 'tipp7.versus', 'version': version, 'name': 'Versus'}))
             archive.writestr(name, data)
+            archive.writestr('changelog.md', notes)
             if sound is not None:
                 archive.writestr('resources/ready.ogg', sound)
             if apple:
@@ -74,6 +75,12 @@ class Packaging(unittest.TestCase):
         self.fixture('Android32', 'membership', actual_edition='standard')
         with self.assertRaises(AssertionError):
             self.combine()
+
+    def test_document_line_endings(self):
+        self.fixture('Windows', 'standard', notes=b'Notes\r\nText\r\n')
+        self.combine()
+        with ZipFile(self.root / 'output' / 'tipp7.versus-AllPlatform-standard.geode') as archive:
+            self.assertEqual(archive.read('changelog.md'), b'Notes\nText\n')
 
     def test_rejects_wrong_architecture(self):
         self.fixture('Windows', 'standard', corrupt_arch=True)

@@ -57,6 +57,11 @@ def combine(root, destination, version):
                         continue
                     assert not name.startswith('/') and '..' not in Path(name).parts
                     value = archive.read(name)
+                    # Checkout uses CRLF on Windows and LF on Linux. Only
+                    # normalize bundled documentation; never alter binaries
+                    # or audio when comparing platform resources.
+                    if name.endswith('.md'):
+                        value = value.replace(b'\r\n', b'\n')
                     if name in contents:
                         assert contents[name] == value, f'Platform resource mismatch: {name}'
                     contents[name] = value
