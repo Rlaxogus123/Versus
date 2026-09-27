@@ -37,6 +37,25 @@ inline std::string selectionSummary(MapSelection const& filter) {
     for (int i = 0; i < 10; ++i) if (filter.mask & CATEGORY_MASKS[i]) { ++categories; last = i; }
     return categories == 1 ? RANDOM_DIFFICULTIES[last] : std::to_string(categories) + " difficulties selected";
 }
+struct RandomFilterPreview {
+    int category;
+    std::string stars;
+};
+inline std::vector<RandomFilterPreview> randomFilterPreview(MapSelection const& filter) {
+    std::vector<RandomFilterPreview> result;
+    if (!filter.random || !validSelection(filter)) return result;
+    for (int category = 0; category < 10; ++category) {
+        int bits = filter.mask & CATEGORY_MASKS[category];
+        if (!bits) continue;
+        std::string stars;
+        for (int bit = 0; bit < 13; ++bit) if (bits & (1 << bit)) {
+            if (!stars.empty()) stars += "/";
+            stars += std::to_string(bit < 8 ? bit + 2 : 10);
+        }
+        result.push_back({category, std::move(stars)});
+    }
+    return result;
+}
 struct RandomMapQuery { int difficulty; int demonFilter; };
 inline std::vector<RandomMapQuery> randomMapQueries(MapSelection const& filter) {
     std::vector<RandomMapQuery> result;

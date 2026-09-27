@@ -54,6 +54,58 @@ CCLabelBMFont* label(CCNode* parent, std::string const& text, CCPoint position,
     return value;
 }
 
+// Shared rating treatment: native star sprite, never a font asterisk or new texture.
+CCNode* starRating(CCNode* parent, std::string const& stars, CCPoint position,
+    float scale = .34f, float maxWidth = 0.f) {
+    auto* group = CCNode::create();
+    group->setAnchorPoint({.5f, .5f}); group->setPosition(position);
+    auto* number = label(group, stars, {}, scale, 0.f, ccWHITE, false, "goldFont.fnt");
+    auto const textSize = number->getScaledContentSize();
+    auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
+    float const iconHeight = std::max(7.f, textSize.height * .85f);
+    float width = textSize.width;
+    float height = textSize.height;
+    if (star) {
+        star->setScale(iconHeight / std::max(1.f, star->getContentSize().height));
+        auto const iconSize = star->getScaledContentSize();
+        width += 2.f + iconSize.width; height = std::max(height, iconSize.height);
+        star->setPosition({textSize.width + 2.f + iconSize.width / 2.f, height / 2.f});
+        group->addChild(star);
+    }
+    number->setPosition({textSize.width / 2.f, height / 2.f});
+    group->setContentSize({width, height});
+    if (maxWidth > 0.f && width > maxWidth) group->setScale(maxWidth / width);
+    parent->addChild(group);
+    return group;
+}
+
+void randomFilterBadges(CCNode* parent, MapSelection const& selection, CCPoint origin, float width) {
+    auto const entries = randomFilterPreview(selection);
+    if (entries.empty()) return;
+    int const count = static_cast<int>(entries.size());
+    int const rows = count > 5 ? 2 : 1;
+    int const columns = (count + rows - 1) / rows;
+    float const cellWidth = std::min(78.f, width / columns);
+    for (int i = 0; i < count; ++i) {
+        int const row = i / columns, column = i % columns;
+        int const rowCount = std::min(columns, count - row * columns);
+        float const x = origin.x + width / 2.f + (column - (rowCount - 1) / 2.f) * cellWidth;
+        float const bottom = origin.y + (rows - row - 1) * 44.f;
+        auto* face = GJDifficultySprite::create(CATEGORY_FACES[entries[i].category], GJDifficultyName::Short);
+        if (face) {
+            auto const size = face->getContentSize();
+            face->setScale(std::min({.9f, (cellWidth - 6.f) / std::max(1.f, size.width),
+                (rows == 1 ? 47.f : 27.f) / std::max(1.f, size.height)}));
+            face->setPosition({x, bottom + (rows == 1 ? 55.f : 29.f)});
+            face->setID(fmt::format("random-filter-face-{}", entries[i].category));
+            parent->addChild(face);
+        }
+        auto* rating = starRating(parent, entries[i].stars, {x, bottom + (rows == 1 ? 19.f : 7.f)},
+            rows == 1 ? .38f : .30f, cellWidth - 6.f);
+        rating->setID(fmt::format("random-filter-stars-{}", entries[i].category));
+    }
+}
+
 CCNode* panel(CCNode* parent, CCPoint position, CCSize size, bool decorated = true) {
     auto* node = CCNode::create();
     node->setPosition(position);
@@ -1296,30 +1348,37 @@ class RoomLayer : public SceneLayer {
             !host, opponentReady, roomWins(room, !host), opponentChecking);
         float const centerWidth = width - 2.f * cardWidth - 40.f;
         float const centerX = width / 2.f;
-        // The native sprite's NA/Auto values are reversed from GJDifficulty.
-        int const difficulty = room.level.id
-            ? (room.level.autoLevel ? -1 : std::clamp(room.level.difficulty, 0, 10)) : 0;
-        auto* face = GJDifficultySprite::create(difficulty, GJDifficultyName::Short);
-        if (face) {
-            face->setScale(.90f);
-            face->setPosition({centerX, height - 79.f});
-            frame->addChild(face);
-        }
-        label(frame, room.level.id ? room.level.name : room.mapSelection.random ? "Random Map" : "Choose a map",
-            {centerX, height - 114.f}, .45f, centerWidth);
-        if (room.level.id) {
-            label(frame, room.level.creator.empty() ? "Unknown creator" : room.level.creator,
-                {centerX, height - 132.f}, .42f, centerWidth, ccWHITE, false, "goldFont.fnt");
-            auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
-            if (star) {
-                star->setScale(.75f);
-                star->setPosition({centerX + 15.f, height - 150.f});
-                frame->addChild(star);
-            }
-            label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 150.f}, .36f, 40.f, ccc3(255, 230, 130));
+        if (!room.level.id && room.mapSelection.random) {
+            label(frame, "Random Map", {centerX, height - 56.f}, .40f, centerWidth);
+            randomFilterBadges(frame, room.mapSelection, {centerX - centerWidth / 2.f, height - 155.f}, centerWidth);
         } else {
-            label(frame, room.mapSelection.random ? selectionSummary(room.mapSelection) : "A map for your duel", {centerX, height - 135.f}, .39f,
-                centerWidth, kMuted, false, "chatFont.fnt");
+            if (room.level.id) {
+                auto* selected = NineSlice::create("square02b_001.png");
+                selected->setID("selected-map-highlight"_spr);
+                selected->setContentSize({centerWidth + 6.f, 108.f});
+                selected->setPosition({centerX, height - 102.f});
+                selected->setColor(ccc3(255, 150, 50)); selected->setOpacity(38);
+                frame->addChild(selected);
+            }
+            // The native sprite's NA/Auto values are reversed from GJDifficulty.
+            int const difficulty = room.level.id
+                ? (room.level.autoLevel ? -1 : std::clamp(room.level.difficulty, 0, 10)) : 0;
+            auto* face = GJDifficultySprite::create(difficulty, GJDifficultyName::Short);
+            if (face) {
+                face->setScale(.90f);
+                face->setPosition({centerX, height - 79.f});
+                frame->addChild(face);
+            }
+            label(frame, room.level.id ? room.level.name : "Choose a map",
+                {centerX, height - 114.f}, .45f, centerWidth);
+            if (room.level.id) {
+                label(frame, room.level.creator.empty() ? "Unknown creator" : room.level.creator,
+                    {centerX, height - 132.f}, .42f, centerWidth, ccWHITE, false, "goldFont.fnt");
+                starRating(frame, std::to_string(room.level.stars), {centerX, height - 148.f}, .36f, centerWidth);
+            } else {
+                label(frame, "A map for your duel", {centerX, height - 135.f}, .39f,
+                    centerWidth, kMuted, false, "chatFont.fnt");
+            }
         }
         auto* actions = menu(frame);
         auto const control = readyControl(room.started || drawingMap(room), m_pending, host, room.level.id > 0 || needsRandomDraw(room),

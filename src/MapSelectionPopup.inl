@@ -9,7 +9,7 @@ class MapSelectionPopup final : public Popup {
     std::vector<CCMenuItemSpriteExtra*> m_difficulties;
     std::vector<CCSprite*> m_checks;
     std::vector<CCLabelBMFont*> m_names;
-    struct StarChoice { int category, bit; CCMenuItemSpriteExtra* item; CCLabelBMFont* text; };
+    struct StarChoice { int category, bit; CCMenuItemSpriteExtra* item; CCSprite* check; };
     std::vector<StarChoice> m_stars;
     CCLabelBMFont* m_hint = nullptr;
     CCLabelBMFont* m_manualHint = nullptr;
@@ -31,10 +31,10 @@ class MapSelectionPopup final : public Popup {
         }
         for (auto const& choice : m_stars) {
             bool visible = m_selection.random && (m_selection.mask & CATEGORY_MASKS[choice.category]);
-            choice.item->setVisible(visible); choice.text->setVisible(visible);
-            choice.item->setEnabled(visible && !m_pending);
-            auto* sprite = CCSprite::createWithSpriteFrameName((m_selection.mask & choice.bit) ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png");
-            sprite->setScale(.43f); choice.item->setSprite(sprite);
+            choice.item->setVisible(visible);
+            enabled(choice.item, visible && !m_pending);
+            choice.check->setDisplayFrame(CCSpriteFrameCache::sharedSpriteFrameCache()->spriteFrameByName(
+                (m_selection.mask & choice.bit) ? "GJ_checkOn_001.png" : "GJ_checkOff_001.png"));
         }
         auto* type = static_cast<ButtonSprite*>(m_type->getNormalImage());
         type->setString(m_selection.platformer ? "Platformer" : "Classic");
@@ -72,14 +72,17 @@ class MapSelectionPopup final : public Popup {
             int bits = CATEGORY_MASKS[i];
             int count = std::popcount(static_cast<unsigned>(bits)), column = 0;
             for (int bitIndex = 0; bitIndex < 13; ++bitIndex) if (bits & (1 << bitIndex)) {
-                float const start = x - (count == 2 ? 28.f : 10.f) + column++ * 37.f;
+                float const start = x - (count - 1) * 22.f + column++ * 44.f;
                 float const starY = i < 5 ? 148.f : 64.f;
+                // One hit target includes the checkbox, number and native star.
+                auto* optionSprite = CCSprite::create(); optionSprite->setContentSize({42.f, 24.f});
                 auto* box = CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png"); box->setScale(.43f);
-                auto* option = CCMenuItemSpriteExtra::create(box, this, menu_selector(MapSelectionPopup::onStar));
+                box->setPosition({8.f, 12.f}); optionSprite->addChild(box);
+                starRating(optionSprite, std::to_string(bitIndex < 8 ? bitIndex + 2 : 10), {29.f, 12.f}, .30f, 22.f);
+                auto* option = CCMenuItemSpriteExtra::create(optionSprite, this, menu_selector(MapSelectionPopup::onStar));
                 option->setPosition({start, starY}); option->setTag(1 << bitIndex); option->m_scaleMultiplier = 1.1f;
                 m_buttonMenu->addChild(option);
-                auto* text = label(m_mainLayer, fmt::format("{}*", bitIndex < 8 ? bitIndex + 2 : 10), {start + 16.f, starY}, .27f, 24.f);
-                m_stars.push_back({i, 1 << bitIndex, option, text});
+                m_stars.push_back({i, 1 << bitIndex, option, box});
             }
         }
         m_type = button(m_buttonMenu, this, menu_selector(MapSelectionPopup::onType), "Classic", {126.f, 29.f}, .52f);

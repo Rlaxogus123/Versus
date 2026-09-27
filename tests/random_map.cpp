@@ -34,6 +34,21 @@ int main() {
     check(validSelection({false, 0, false}), "manual mode needs no filter");
     for (int mask = 1; mask <= ALL_MAP_CHOICES; ++mask) {
         MapSelection filter{true, mask, false};
+        auto preview = randomFilterPreview(filter);
+        int previewBits = 0, lastCategory = -1;
+        for (auto const& entry : preview) {
+            check(entry.category > lastCategory && entry.category < 10, "preview categories ordered and unique");
+            lastCategory = entry.category;
+            std::string expectedStars;
+            for (int bit = 0; bit < 13; ++bit) if (mask & CATEGORY_MASKS[entry.category] & (1 << bit)) {
+                previewBits |= 1 << bit;
+                if (!expectedStars.empty()) expectedStars += "/";
+                expectedStars += std::to_string(bit < 8 ? bit + 2 : 10);
+            }
+            check(!expectedStars.empty() && entry.stars == expectedStars, "preview shows exact selected stars only");
+            ++checks;
+        }
+        check(previewBits == mask, "preview omits no selected difficulty or star");
         for (int bit = 0; bit < 13; ++bit) {
             LevelInfo sample{123, "Test", bit < 8 ? 3 : CATEGORY_FACES[bit - 3], bit < 8 ? bit + 2 : 10, bit >= 8};
             check(matchesRandomMap(sample, filter) == ((mask & (1 << bit)) != 0), "OR/star selection mismatch");
@@ -41,6 +56,14 @@ int main() {
         }
     }
     auto queries = randomMapQueries({true, 4 | 8 | 256 | 2048, false});
+    auto demons = randomFilterPreview({true, 256 | 1024, false});
+    check(demons.size() == 2 && demons[0].category == 5 && demons[1].category == 7 &&
+        demons[0].stars == "10" && demons[1].stars == "10", "easy and hard demon preview");
+    check(randomFilterPreview({true, 2, false})[0].stars == "3", "unchecked 4-star hidden");
+    check(randomFilterPreview({true, 6, true})[0].stars == "3/4", "both selected stars visible");
+    check(randomFilterPreview({false, 8191, false}).empty(), "manual mode has no filter preview");
+    check(randomFilterPreview({true, 0, false}).empty(), "empty filter preview safe");
+    check(randomFilterPreview({true, 8192, false}).empty(), "invalid filter preview safe");
     check(queries.size() == 3, "4/5 stars share one native search");
     check(queries[0].difficulty == 3 && queries[1].demonFilter == 1 && queries[2].demonFilter == 4, "native OR queries");
     valid.id = 0;

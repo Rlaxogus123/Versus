@@ -1,3 +1,10 @@
+# v0.5.2
+
+- Replace the random-room NA placeholder with all selected difficulty faces and their exact star choices, wrapping up to ten filters into two centered rows.
+- Use native gold star sprites in filter checkboxes and make the whole number/star row tappable.
+- Add a very transparent orange highlight behind confirmed map information only.
+- Reuse existing Geometry Dash assets; no additional image resources or Firebase rule changes.
+
 # v0.5.1
 
 - Replace random-filter text buttons with native GD difficulty icons, multi-selection and per-star checkboxes.
