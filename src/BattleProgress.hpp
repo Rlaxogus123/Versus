@@ -1,8 +1,18 @@
 #pragma once
 #include "VersusService.hpp"
 #include <algorithm>
+#include <string_view>
 
 namespace versus::battle {
+// A progress request also reads the authoritative room. A final/canceled/new
+// match is a successful read, not a failed write to retry against stale state.
+inline bool adoptBattleReport(bool started, std::string_view launchID,
+    std::string_view battleID, int64_t releasedAt, int64_t finishedAt,
+    std::string_view expectedID) {
+    return !started || launchID != expectedID || battleID != expectedID ||
+        releasedAt <= 0 || finishedAt > 0;
+}
+
 inline bool terminal(BattlePlayerState const& player, GameRules const& rules) {
     return player.forfeited || player.cleared ||
         (rules.mode == 0 && !rules.practice && player.attemptsUsed >= rules.attempts);

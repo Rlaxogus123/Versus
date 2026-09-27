@@ -41,6 +41,9 @@ class Cache final : public CCNode, public LevelDownloadDelegate, public MusicDow
     std::deque<Job> queue;
     std::optional<Job> current;
     std::map<int, Ref<GJGameLevel>> levels;
+    std::map<int, std::pair<std::set<int>, std::set<int>>> dependencies;
+    std::map<int, uint64_t> levelUse;
+    uint64_t useCounter = 0;
     bool pending = false;
     int pendingID = 0;
     uint64_t generation = 0, requestGeneration = 0;
@@ -52,6 +55,7 @@ class Cache final : public CCNode, public LevelDownloadDelegate, public MusicDow
     Clock::time_point began, progressed, levelRetryAt;
     std::string failure;
     size_t completedAssets = 0;
+    int lastProgress = 0;
     float timer = 0.f;
 public:
     static Cache& get() {
@@ -64,17 +68,45 @@ public:
         }();
         return *instance;
     }
+    void remember(GJGameLevel* value) {
+        int const id = value->m_levelID.value();
+        levels[id] = value;
+        levelUse[id] = ++useCounter;
+        dependencies.erase(id);
+        // Keep repeated matches fast without retaining every downloaded level
+        // string for the whole process on memory-constrained phones.
+        while (levels.size() > 8) {
+            auto oldest = levelUse.end();
+            for (auto it = levelUse.begin(); it != levelUse.end(); ++it) {
+                if (it->first == id || (current && it->first == current->id)) continue;
+                if (oldest == levelUse.end() || it->second < oldest->second) oldest = it;
+            }
+            if (oldest == levelUse.end()) break;
+            dependencies.erase(oldest->first);
+            levels.erase(oldest->first);
+            levelUse.erase(oldest);
+        }
+    }
     GJGameLevel* level(int id) {
-        if (auto found = levels.find(id); found != levels.end()) return found->second.data();
+        if (auto found = levels.find(id); found != levels.end()) {
+            levelUse[id] = ++useCounter;
+            return found->second.data();
+        }
         auto* saved = GameLevelManager::sharedState()->getSavedLevel(id);
         if (!saved || saved->m_levelString.empty()) return nullptr;
-        levels.emplace(id, saved);
+        remember(saved);
         return saved;
+    }
+    auto const& assetsFor(GJGameLevel* value) {
+        int const id = value->m_levelID.value();
+        auto found = dependencies.find(id);
+        if (found == dependencies.end()) found = dependencies.emplace(id, assets(value)).first;
+        return found->second;
     }
     bool ready(int id) {
         auto* value = level(id);
         if (!value || value->m_levelString.empty()) return false;
-        auto [audio, effects] = assets(value);
+        auto const& [audio, effects] = assetsFor(value);
         auto* manager = MusicDownloadManager::sharedState();
         return std::all_of(audio.begin(), audio.end(), [manager](int i) { return manager->isSongDownloaded(i); }) &&
             std::all_of(effects.begin(), effects.end(), [manager](int i) { return manager->isSFXDownloaded(i); });
@@ -113,7 +145,7 @@ public:
         }
         if (value->m_levelID.value() != pendingID) return;
         releaseDelegate();
-        if (!value->m_levelString.empty()) levels[value->m_levelID.value()] = value;
+        if (!value->m_levelString.empty()) remember(value);
         else if (valid) retryLevel("The selected map contains no level data.");
     }
     void retryLevel(std::string const& detail) {
@@ -163,6 +195,7 @@ public:
             levelRetryAt = began;
             levelAttempts = 0;
             completedAssets = 0;
+            lastProgress = 0;
             failure.clear();
             askedURL = false;
         }
@@ -186,13 +219,18 @@ public:
         }
         auto* music = MusicDownloadManager::sharedState();
         if (!watchingMusic) {
-            auto dependencies = assets(value);
-            songs = std::move(dependencies.first); sounds = std::move(dependencies.second);
+            auto const& required = assetsFor(value);
+            songs = required.first; sounds = required.second;
             music->tryLoadLibraries();
             music->addMusicDownloadDelegate(this); watchingMusic = true;
             progressed = Clock::now();
         }
         if (ready(current->id)) { finish(true, {}); return; }
+        auto const progress = versus::mapDownloadProgress(current->id);
+        if (progress.percent > lastProgress) {
+            lastProgress = progress.percent;
+            progressed = Clock::now();
+        }
         bool needsURL = std::any_of(songs.begin(), songs.end(), [music](int i) {
             return i > 10000000 && !music->isSongDownloaded(i);
         }) || std::any_of(sounds.begin(), sounds.end(), [music](int i) { return !music->isSFXDownloaded(i); });
@@ -235,6 +273,40 @@ public:
 };
 }
 namespace versus {
+std::string MapDownloadProgress::caption() const {
+    if (!mapReady) return "LOCAL: Downloading map...";
+    if (complete()) return "LOCAL: Map + audio ready";
+    return fmt::format("LOCAL: Preparing {}%", percent);
+}
+std::string MapDownloadProgress::detail() const {
+    if (!mapReady) return "Map ...  |  Music / SFX: checking";
+    return fmt::format("Map OK  |  Music {}/{}  |  SFX {}/{}",
+        songsDone, songsTotal, soundsDone, soundsTotal);
+}
+MapDownloadProgress mapDownloadProgress(int64_t id) {
+    MapDownloadProgress result;
+    auto* level = cachedLevel(id);
+    if (!level || level->m_levelString.empty()) return result;
+    result.mapReady = true;
+    auto const& [songs, sounds] = Cache::get().assetsFor(level);
+    result.songsTotal = static_cast<int>(songs.size());
+    result.soundsTotal = static_cast<int>(sounds.size());
+    auto* music = MusicDownloadManager::sharedState();
+    double units = 1.; // completed map
+    for (int song : songs) {
+        bool const done = music->isSongDownloaded(song);
+        result.songsDone += done;
+        units += done ? 1. : std::clamp(music->getDownloadProgress(song), 0, 99) / 100.;
+    }
+    for (int sound : sounds) {
+        bool const done = music->isSFXDownloaded(sound);
+        result.soundsDone += done;
+        units += done ? 1. : std::clamp(music->getSFXDownloadProgress(sound), 0, 99) / 100.;
+    }
+    result.percent = result.complete() ? 100 : std::clamp(static_cast<int>(
+        100. * units / (1 + result.songsTotal + result.soundsTotal)), 0, 99);
+    return result;
+}
 GJGameLevel* cachedLevel(int64_t id) {
     return id > 0 && id <= std::numeric_limits<int>::max() ? Cache::get().level(static_cast<int>(id)) : nullptr;
 }

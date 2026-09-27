@@ -11,7 +11,6 @@
 #include <Geode/binding/LevelDownloadDelegate.hpp>
 #include <Geode/binding/MusicDownloadManager.hpp>
 #include <Geode/binding/MusicDownloadDelegate.hpp>
-#include <Geode/binding/MenuLayer.hpp>
 #include <Geode/binding/PlayerObject.hpp>
 #include <Geode/modify/GameManager.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
@@ -358,7 +357,6 @@ public:
     void returnScene() {
         stopWatchingMusic();
         auto nativeQuit = redirectQuit;
-        auto battleMenu = versus::battle::consumeMainMenuReturn();
         auto message = notice;
         phase = Phase::Idle;
         redirectQuit = false;
@@ -369,10 +367,7 @@ public:
         level = nullptr;
         auto& service = versus::Service::get();
         auto const& room = service.room();
-        if (battleMenu) {
-            CCDirector::sharedDirector()->replaceScene(MenuLayer::scene(false));
-        }
-        else if (room && room->id == roomID) {
+        if (room && room->id == roomID) {
             auto* scene = versus::roomScene();
             CCDirector::sharedDirector()->replaceScene(scene);
         }
@@ -413,14 +408,19 @@ public:
         }
         timer -= dt;
         if (phase == Phase::Download) {
-            text("Downloading the selected map...");
-            if (timer <= 0.f) { timer = .5f; requestDownload(); }
+            if (timer <= 0.f) {
+                timer = .5f;
+                auto const progress = versus::mapDownloadProgress(levelID);
+                text(fmt::format("{}\n{}", progress.caption(), progress.detail()));
+                requestDownload();
+            }
             return;
         }
         if (phase == Phase::Resources) {
-            text("Downloading map music and sounds...");
             if (timer <= 0.f) {
                 timer = .25f;
+                auto const progress = versus::mapDownloadProgress(levelID);
+                text(fmt::format("{}\n{}", progress.caption(), progress.detail()));
                 if (resourcesReady()) enterLevel();
             }
             return;

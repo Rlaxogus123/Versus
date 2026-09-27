@@ -20,3 +20,5 @@ CMakeUserPresets.json
 *.dll
 *.lib
 *.exp
+__pycache__/
+*.pyc

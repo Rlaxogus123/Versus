@@ -40,5 +40,20 @@ int main() {
     require(showRunner(rules, a, b, false, false, false), "target reached waits for reply attempt");
     b.bestPercent = 40;
     require(!showRunner(rules, a, b, false, false, false), "tie waits for result without runner");
+    require(!adoptBattleReport(true, "match-a", "match-a", 1000, 0, "match-a"),
+        "active matching match accepts progress writes");
+    require(adoptBattleReport(true, "match-a", "match-a", 1000, 40000, "match-a"),
+        "timeout race adopts the finished snapshot instead of retrying forever");
+    require(adoptBattleReport(false, "", "", 0, 0, "match-a"),
+        "canceled match is adopted without stale progress writes");
+    require(adoptBattleReport(true, "match-b", "match-b", 50000, 0, "match-a"),
+        "new match is adopted without overwriting it");
+    rules = {}; rules.attempts = 2; a = {}; b = {};
+    a.paused = true; a.pausedAt = 1000; b.attemptsUsed = 2; b.spectating = true;
+    require(showRunner(rules, b, a, false, false, false), "exhausted B waits while A pauses");
+    require(!showRunner(rules, b, a, false, true, false),
+        "authoritative AFK result removes B runner even without forfeited flag");
+    a.forfeited = true;
+    require(!showRunner(rules, b, a, false, false, false), "A forfeit ends B runner too");
     std::cout << "Battle progression regression checks passed\n";
 }

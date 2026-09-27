@@ -17,7 +17,7 @@ int main() {
     for (int difficulty = 1; difficulty <= 10; ++difficulty) {
         MapSelection filter{true, CATEGORY_MASKS[category], platformer};
         LevelInfo level{123, "Test", difficulty, stars, difficulty >= 6, false, actualType};
-        int lows[] = {2, 3, 5, 6, 8}, highs[] = {2, 4, 5, 7, 9};
+        int lows[] = {2, 3, 4, 6, 8}, highs[] = {2, 3, 5, 7, 9};
         int demonTiers[] = {7, 8, 6, 9, 10};
         bool expected = platformer == actualType && (category < 5
             ? difficulty < 6 && stars >= lows[category] && stars <= highs[category]
@@ -60,7 +60,9 @@ int main() {
     check(demons.size() == 2 && demons[0].category == 5 && demons[1].category == 7 &&
         demons[0].stars == "10" && demons[1].stars == "10", "easy and hard demon preview");
     check(randomFilterPreview({true, 2, false})[0].stars == "3", "unchecked 4-star hidden");
-    check(randomFilterPreview({true, 6, true})[0].stars == "3/4", "both selected stars visible");
+    check(randomFilterPreview({true, 12, true})[0].stars == "4/5", "Hard shows both selected stars");
+    check(randomFilterPreview({true, 6, true}).size() == 2, "Normal 3 and Hard 4 have separate faces");
+    check(legacySelectionMask(1) == 2 && legacySelectionMask(2) == 12, "legacy category conversion matches native stars");
     check(randomFilterPreview({false, 8191, false}).empty(), "manual mode has no filter preview");
     check(randomFilterPreview({true, 0, false}).empty(), "empty filter preview safe");
     check(randomFilterPreview({true, 8192, false}).empty(), "invalid filter preview safe");

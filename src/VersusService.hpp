@@ -26,6 +26,7 @@ struct LevelInfo {
     bool autoLevel = false;
     bool platformer = false;
     std::string creator;
+    int featureState = 0; // GD: none, featured, epic, legendary, mythic
     bool operator==(LevelInfo const&) const = default;
 };
 struct MapSelection {
@@ -109,6 +110,14 @@ struct RoomInfo {
     PlayerProfile host;
     std::optional<PlayerProfile> guest;
     LevelInfo level;
+    struct DownloadInfo {
+        std::string uid;
+        int64_t levelId = 0, updatedAt = 0;
+        int percent = 0;
+        bool mapReady = false;
+        int songsDone = 0, songsTotal = 0, soundsDone = 0, soundsTotal = 0;
+    };
+    DownloadInfo hostDownload, guestDownload;
     MapSelection mapSelection;
     std::optional<MapDraw> mapDraw;
     int hostWins = 0, guestWins = 0;
@@ -140,6 +149,7 @@ public:
     bool busy() const;
     void fetchRooms(RoomListCallback callback);
     void fetchHistory(HistoryCallback callback);
+    void fetchPlayerHistory(std::string uid, HistoryCallback callback);
     void fetchAttempts(MatchRecord match, int firstRun, AttemptsCallback callback);
     void recordAttempt(int run, int percent);
     void acknowledgeResult(Done callback);

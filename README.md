@@ -9,6 +9,10 @@ Versus provides a room browser and waiting room for one-on-one matches.
   two seats: its host and one guest.
 - The waiting room downloads the selected level and audio automatically. Both
   players ready independently; changing the map or rules clears both states.
+- Both player cards show preparation percentages, bars and music/SFX file
+  counts. Percentages weight each asset equally, not by byte size; the native
+  map request has no byte-progress callback. Peer updates are throttled to
+  roughly two seconds plus network latency.
 - Map Mode offers the existing native map picker or a rated-only Random Map
   mode. Multi-select native difficulty icons, check exact stars, and choose
   Classic or Platformer. Selected filters are combined with OR. Both players Ready,
@@ -22,11 +26,19 @@ Versus provides a room browser and waiting room for one-on-one matches.
   the entire GD catalogue. A sparse filter may return 2–9 cards; fewer than
   two candidates produces a retry message instead of an invalid draw.
 - The host configures attempts or percentage rules and Practice. The lobby
-  shows the active rule before joining.
-- Room emotes provide four rate-limited reactions in animated speech bubbles.
+  shows the active rule before joining; either player can open Game Rules.
+  Platformer maps support Attempts only. Room names use the host's nickname.
+- Click a room player's name to view their recent matches or GD account.
+  History access expires when either player leaves the room; historical
+  attempt logs remain private unless the viewer played that match.
+- Room emotes provide four rate-limited reactions in animated speech bubbles;
+  the membership edition adds a fifth money reaction.
 - Starting loads the selected map for both players. Gameplay waits for both to
   enter, with a 60-second deadline and a shared three-second countdown.
 - Download errors, cancellation and loading timeouts return to the room.
+- Quitting/forfeiting an active Versus match keeps its room. A forfeit waits
+  for server confirmation before returning; a sustained connection failure
+  can delay this return. Ordinary GD map exits are unaffected.
 - Leaving as host closes the room and returns its guest to the room browser.
 - Large gold-font Win counts track this room's current pair only. Each finished
   match counts once; draws add no wins. Rematches/map/rule changes preserve the
@@ -49,6 +61,17 @@ CI) are paused until explicitly requested again. The fixed combined filename
 remains `dist/tipp7.versus-AllPlatform.geode`; it contains only these three
 current targets, never older Apple binaries.
 
+The release also provides `dist/tipp7.versus-AllPlatform-standard.geode` and
+`dist/tipp7.versus-AllPlatform-membership.geode`. The fixed legacy filename is
+an alias of the standard package. Membership adds green-to-white nickname
+colors and the money emote. Both share the same mod ID: install only one.
+This is a compile-time cosmetic edition, not server-verified paid entitlement.
+
+Use `-DVERSUS_MEMBERSHIP=ON` or `OFF` when configuring CMake to select the
+edition. `-DGEODE_DONT_INSTALL_MODS=ON` packages without replacing the local
+installed mod. The CI builds both editions for all three targets and verifies
+architecture, edition markers, resources and ZIP integrity before publishing.
+
 The Geode CLI is configured to use the `First` profile. Run this command from
 the project directory:
 
@@ -58,3 +81,14 @@ geode build --config Release
 
 On Windows, every successful build packages the mod and installs it into the
 active Geometry Dash Geode profile automatically.
+
+## Verification
+
+Run the CMake tests in `tests/`, the offline `tests/package_editions.py`
+regressions, and `tests/firebase-rules.ps1` against a local database emulator.
+The Firebase test script addresses loopback only and never deploys rules.
+
+Before distributing a release, manually check two-client downloads, native
+map decorations, money reactions, spectator timeout results and repeated
+room-return/rematch cycles on Windows and low-memory Android devices. These
+in-game/device checks are not covered by the headless test suite.

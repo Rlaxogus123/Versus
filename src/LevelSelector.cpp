@@ -120,6 +120,8 @@ LevelInfo describeLevel(GJGameLevel* level) {
     info.creator = std::string(level->m_creatorName);
     if (info.creator.size() > 32) info.creator.resize(32);
     info.stars = level->m_stars.value();
+    info.featureState = level->m_isEpic >= 3 ? 4 : level->m_isEpic == 2 ? 3 :
+        level->m_isEpic == 1 ? 2 : level->m_featured >= 1 ? 1 : 0;
     info.demon = level->m_demon.value() != 0;
     info.autoLevel = level->m_autoLevel;
     info.platformer = level->isPlatformer();
@@ -229,6 +231,10 @@ class $modify(VersusNativeLevelCell, LevelCell) {
             m_level->m_levelType == GJLevelType::Editor ||
             m_level->m_levelType == GJLevelType::Main) {
             FLAlertLayer::create("Versus", "Choose an online level.", "OK")->show();
+            return;
+        }
+        if (m_level->isPlatformer() && service.room()->rules.mode == 1) {
+            FLAlertLayer::create("Versus", "Platformer maps do not support Percent mode. Choose Attempts mode first.", "OK")->show();
             return;
         }
         returnToRoom(versus::describeLevel(m_level));

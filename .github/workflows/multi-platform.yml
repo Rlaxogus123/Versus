@@ -14,77 +14,57 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        edition: [standard, membership]
         config:
           - name: Windows
             os: windows-latest
-
           - name: Android32
             os: ubuntu-latest
             target: Android32
-
           - name: Android64
             os: ubuntu-latest
             target: Android64
-
-    name: ${{ matrix.config.name }}
+    name: ${{ matrix.config.name }} (${{ matrix.edition }})
     runs-on: ${{ matrix.config.os }}
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Build the mod
+        id: build
         uses: geode-sdk/build-geode-mod@main
         with:
-          combine: true
+          combine: false
           target: ${{ matrix.config.target }}
+          configure-args: -DVERSUS_MEMBERSHIP=${{ matrix.edition == 'membership' && 'ON' || 'OFF' }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geode-${{ matrix.config.name }}-${{ matrix.edition }}
+          path: ${{ steps.build.outputs.build-output }}/*.geode
+          if-no-files-found: error
 
   package:
     name: Package builds
     runs-on: ubuntu-latest
     needs: [build]
-
     steps:
-      - uses: geode-sdk/build-geode-mod/combine@main
-        id: build
-
-      - name: Validate Windows and Android package
-        env:
-          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          from zipfile import ZipFile
-          packages = list(Path(os.environ['BUILD_OUTPUT']).glob('*.geode'))
-          assert len(packages) == 1, 'Expected one combined package'
-          expected = {'tipp7.versus.dll', 'tipp7.versus.android32.so', 'tipp7.versus.android64.so'}
-          with ZipFile(packages[0]) as archive:
-              assert archive.testzip() is None, 'Damaged archive'
-              binaries = {name for name in archive.namelist() if name.endswith(('.dll', '.so', '.dylib'))}
-              assert binaries == expected, f'Unexpected platforms: {binaries}'
-              assert json.loads(archive.read('mod.json'))['id'] == 'tipp7.versus'
-          print('Verified Windows / Android32 / Android64, without Apple binaries')
-          PY
-
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: geode-*
+          path: artifacts
+      - name: Combine and verify both editions
+        run: python3 scripts/package_editions.py artifacts output
       - uses: actions/upload-artifact@v4
         with:
           name: Build Output
-          path: ${{ steps.build.outputs.build-output }}
-
-      - name: Prepare fixed all-platform filename
-        if: github.ref == 'refs/heads/main'
-        shell: bash
-        run: |
-          combined_file="$(find "${{ steps.build.outputs.build-output }}" -maxdepth 1 -type f -name '*.geode' -print -quit)"
-          test -n "$combined_file"
-          cp "$combined_file" "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode"
-
-      - name: Publish rolling all-platform build
+          path: output/*.geode
+          if-no-files-found: error
+      - name: Publish rolling all-platform builds
         if: github.ref == 'refs/heads/main'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          cp output/tipp7.versus-AllPlatform-standard.geode output/tipp7.versus-AllPlatform.geode
           gh release view all-platform-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create all-platform-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Latest Windows and Android Build" --notes "Windows, Android32 and Android64. iOS/macOS builds are paused. Automatically updated from main."
-          gh release upload all-platform-latest "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode" --repo "$GITHUB_REPOSITORY" --clobber
+            gh release create all-platform-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Latest Windows and Android Builds" --notes "Standard and membership editions. Install only one. Windows, Android32 and Android64; no Apple binaries."
+          gh release upload all-platform-latest output/*.geode --repo "$GITHUB_REPOSITORY" --clobber

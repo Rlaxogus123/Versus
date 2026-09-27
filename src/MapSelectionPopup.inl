@@ -98,10 +98,22 @@ class MapSelectionPopup final : public Popup {
         refresh();
     }
     void onStar(CCObject* sender) { m_selection.mask ^= sender->getTag(); refresh(); }
-    void onType(CCObject*) { m_selection.platformer = !m_selection.platformer; refresh(); }
+    void onType(CCObject*) {
+        if (m_pending) return;
+        auto const& room = Service::get().room();
+        if (!m_selection.platformer && room && room->rules.mode == 1) {
+            error("<cy>Platformer</c> maps do not support <cr>Percent mode</c>. Choose Attempts mode first.");
+            return;
+        }
+        m_selection.platformer = !m_selection.platformer; refresh();
+    }
     void onApply(CCObject*) {
         auto const& room = Service::get().room();
         if (m_pending || !room || room->id != m_roomID) return;
+        if (m_selection.random && m_selection.platformer && room->rules.mode == 1) {
+            error("<cy>Platformer</c> maps do not support <cr>Percent mode</c>. Choose Attempts mode first.");
+            return;
+        }
         m_pending = true; refresh();
         Service::get().configureMapSelection(m_selection, [self = WeakRef<MapSelectionPopup>(this)](bool ok, std::string detail) {
             auto popup = self.lock(); if (!popup) return;
@@ -143,13 +155,12 @@ class MapRoulettePopup final : public Popup {
         m_mainLayer->addChild(clip);
         for (auto const& level : m_draw.levels) {
             auto* card = panel(clip, {}, {134.f, 100.f}, false);
-            auto* face = GJDifficultySprite::create(std::clamp(level.difficulty, 0, 10), GJDifficultyName::Short);
+            auto* face = mapDifficulty(level);
             if (face) { face->setPosition({67.f, 76.f}); face->setScale(.65f); card->addChild(face); }
             label(card, level.name, {67.f, 47.f}, .39f, 124.f);
-            label(card, level.creator.empty() ? "Unknown creator" : level.creator, {67.f, 29.f}, .36f, 122.f, ccWHITE, false, "goldFont.fnt");
-            label(card, fmt::format("{}", level.stars), {60.f, 11.f}, .36f, 34.f, ccc3(255, 220, 100));
-            auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
-            if (star) { star->setPosition({78.f, 11.f}); star->setScale(.6f); card->addChild(star); }
+            styleNickname(label(card, level.creator.empty() ? "Unknown creator" : level.creator, {67.f, 29.f}, .36f, 122.f, ccWHITE, false,
+                isMembershipEdition() ? "bigFont.fnt" : "goldFont.fnt"));
+            starRating(card, std::to_string(level.stars), {67.f, 11.f}, .36f, 122.f);
             m_cards.push_back(card);
         }
         label(m_mainLayer, "v", {220.f, 180.f}, .55f, 30.f, ccc3(255, 220, 100));

@@ -1000,7 +1000,7 @@ try {
             Assert-Status "$id seed readied room" (Send-Request PUT "versus-v1/rooms/$id" $random -Admin)
             $levels = @()
             for ($i = 0; $i -lt 10; $i++) {
-                $stars = @(2, (3 + $i % 2), 5, (6 + $i % 2), (8 + $i % 2), 10, 10, 10, 10, 10)[$tier]
+                $stars = @(2, 3, (4 + $i % 2), (6 + $i % 2), (8 + $i % 2), 10, 10, 10, 10, 10)[$tier]
                 $difficulty = @(1, $(if ($stars -eq 3) { 2 } else { 3 }), 3, 4, 5, 7, 8, 6, 9, 10)[$tier]
                 $levels += @{ id = 2000 + $i; name = "Map $i"; difficulty = $difficulty; stars = $stars; demon = ($tier -ge 5); autoLevel = $false; platformer = $platformer }
             }
@@ -1032,6 +1032,7 @@ try {
     Assert-Status 'owner reads last ten history records' $recent
     Assert-True 'history contains only latest ten of twelve' (@($recent.Data.PSObject.Properties).Count -eq 10 -and $null -eq $recent.Data.match1 -and $null -eq $recent.Data.match2 -and $null -ne $recent.Data.match12)
     Assert-Status 'other user cannot read private history' (Send-Request GET 'versus-v1/history/host' -Uid guest -Query 'orderBy=%22playedAt%22&limitToLast=10') @(401, 403)
+    . (Join-Path $PSScriptRoot 'firebase-preparation.ps1')
     Assert-Status 'unbounded history denied' (Send-Request GET 'versus-v1/history/host' -Uid host) @(401, 403)
     Assert-Status 'client cannot invent match results' (Send-Request PUT 'versus-v1/history/host' $history -Uid host) @(401, 403)
     Assert-Status 'client cannot delete history' (Send-Request DELETE 'versus-v1/history/host' -Uid host) @(401, 403)

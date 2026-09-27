@@ -41,6 +41,9 @@ struct MusicDownloadManager {
  std::vector<MusicDownloadDelegate*> delegates;
  std::set<int> songs,sounds,activeSongs,activeSounds,activeInfo;
  std::map<int,SongInfoObject> info;
+ std::map<int,int> songProgress, soundProgress;
+ int getDownloadProgress(int id) { return songProgress.contains(id) ? songProgress.at(id) : -1; }
+ int getSFXDownloadProgress(int id) { return soundProgress.contains(id) ? soundProgress.at(id) : -1; }
  std::vector<int> songRequests,soundRequests,infoRequests;
  std::string m_customContentURL;
  bool enumerating = false;

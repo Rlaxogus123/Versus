@@ -16,5 +16,4 @@ void afterReset(PlayLayer* layer);
 void paused(PlayLayer* layer, bool paused);
 bool allowPracticeToggle(PlayLayer* layer, bool practice);
 bool requestQuit(PlayLayer* layer);
-bool consumeMainMenuReturn();
 }

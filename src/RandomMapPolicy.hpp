@@ -9,7 +9,7 @@ inline constexpr char const* RANDOM_DIFFICULTIES[] = {
     "Easy", "Normal", "Hard", "Harder", "Insane",
     "Easy Demon", "Medium Demon", "Hard Demon", "Insane Demon", "Extreme Demon"
 };
-inline constexpr int CATEGORY_MASKS[] = {1, 6, 8, 48, 192, 256, 512, 1024, 2048, 4096};
+inline constexpr int CATEGORY_MASKS[] = {1, 2, 12, 48, 192, 256, 512, 1024, 2048, 4096};
 inline constexpr int CATEGORY_FACES[] = {1, 2, 3, 4, 5, 7, 8, 6, 9, 10};
 inline constexpr int ALL_MAP_CHOICES = 8191;
 inline int legacySelectionMask(int difficulty) {

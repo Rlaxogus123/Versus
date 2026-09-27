@@ -1,5 +1,8 @@
 #include "SpectatorRunner.hpp"
 #include "RunnerPhysics.hpp"
+#include "Edition.hpp"
+#include <Geode/binding/AnimatedGameObject.hpp>
+#include <Geode/binding/CCAnimatedSprite.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <Geode/binding/GameManager.hpp>
 #include <cmath>
@@ -7,25 +10,32 @@
 using namespace geode::prelude;
 namespace versus {
 namespace {
-CCDrawNode* batMonster() {
-    auto* bat = CCDrawNode::create();
-    ccColor4F black = {0.f, 0.f, 0.f, 1.f};
-    CCPoint leftWing[] = {{-4.f, 2.f}, {-11.f, 9.f}, {-22.f, 6.f},
-        {-19.f, 0.f}, {-27.f, -5.f}, {-17.f, -6.f}, {-12.f, -3.f}, {-4.f, -5.f}};
-    CCPoint rightWing[] = {{4.f, 2.f}, {11.f, 9.f}, {22.f, 6.f},
-        {19.f, 0.f}, {27.f, -5.f}, {17.f, -6.f}, {12.f, -3.f}, {4.f, -5.f}};
-    bat->drawPolygon(leftWing, 8, black, 0.f, black);
-    bat->drawPolygon(rightWing, 8, black, 0.f, black);
-    bat->drawDot({0.f, 0.f}, 8.f, black);
-    CCPoint leftEar[] = {{-6.f, 4.f}, {-6.f, 12.f}, {-1.f, 7.f}};
-    CCPoint rightEar[] = {{6.f, 4.f}, {6.f, 12.f}, {1.f, 7.f}};
-    bat->drawPolygon(leftEar, 3, black, 0.f, black);
-    bat->drawPolygon(rightEar, 3, black, 0.f, black);
-    bat->drawDot({-3.f, 1.f}, 2.f, {1.f, 1.f, 1.f, 1.f});
-    bat->drawDot({3.f, 1.f}, 2.f, {1.f, 1.f, 1.f, 1.f});
-    bat->drawDot({-2.5f, 1.f}, .8f, black);
-    bat->drawDot({3.5f, 1.f}, .8f, black);
-    return bat;
+CCNode* batMonster(bool animate = true) {
+    // Native GD bat: object 1584 / GJBeast04. Its part animation carries the
+    // original jaw, white eye, wing pivots and glow; no replacement bitmap.
+    auto* frames = CCSpriteFrameCache::sharedSpriteFrameCache();
+    if (!frames->spriteFrameByName("GJBeast04_01_001.png"))
+        frames->addSpriteFramesWithFile("FireSheet_01.plist");
+    if (!frames->spriteFrameByName("GJBeast04_01_001.png")) return nullptr;
+    auto* bat = AnimatedGameObject::create(1584);
+    if (!bat || !bat->m_animatedSprite) return nullptr;
+    bat->setObjectColor(ccBLACK);
+    bat->setChildColor(ccWHITE);
+    bat->setVisible(true);
+    bat->setOpacity(255);
+    // This is a UI obstacle, not a registered level object. Keep the native
+    // animation but bypass gameplay-trigger callbacks and collision setup.
+    auto* sprite = bat->m_animatedSprite;
+    sprite->m_delegate = nullptr;
+    sprite->runAnimationForced("idle01");
+    if (animate) bat->runAction(CCRepeatForever::create(CCSequence::create(
+        CCDelayTime::create(.84f), CallFuncExt::create([sprite] {
+            sprite->runAnimationForced("idle01");
+        }), nullptr)));
+    auto* holder = CCNode::create();
+    holder->addChild(bat);
+    bat->setScale(.82f);
+    return holder;
 }
 }
 struct SpectatorRunner::Impl {
@@ -60,6 +70,8 @@ void preloadRunnerAssets() {
     CCTextureCache::sharedTextureCache()->addImage("game_bg_01_001.png", false);
     CCTextureCache::sharedTextureCache()->addImage("groundSquare_01_001.png", false);
     CCSprite::createWithSpriteFrameName("spike_01_001.png");
+    // Populate GD's existing animation caches before a runner obstacle spawns.
+    batMonster(false);
 }
 bool SpectatorRunner::init(PlayerProfile const& profile, GameRules const& rules) {
     if (!CCLayer::init()) return false;
@@ -75,7 +87,7 @@ bool SpectatorRunner::init(PlayerProfile const& profile, GameRules const& rules)
         label->setPosition(p); label->setScale(std::min(scale, maxWidth/std::max(1.f,label->getContentSize().width)));
         addChild(label,5); return label;
     };
-    text("SPECTATOR RUNNER  /  " + profile.name, origin+CCPoint{width/2.f,height-15.f}, .75f, width-20.f);
+    styleNickname(text("SPECTATOR RUNNER  /  " + profile.name, origin+CCPoint{width/2.f,height-15.f}, .75f, width-20.f));
     m->stats=text("",origin+CCPoint{width/2.f,height-34.f},.65f,width-20.f);
     m->scoreLabel=text("Runner 0  /  Best 0",origin+CCPoint{width-15.f,51.f},.5f,width-25.f);
     m->scoreLabel->setAnchorPoint({1.f,.5f});
@@ -140,7 +152,6 @@ void SpectatorRunner::update(float dt) {
             obstacle.x-=dt*speed;
             float y=obstacle.y+(obstacle.flying?std::sin(m->time*6.f)*3.f:0.f);
             obstacle.node->setPosition({obstacle.x,y});
-            if (obstacle.flying) obstacle.node->setScaleY(.77f + .2f * std::sin(m->time * 14.f + obstacle.x * .03f));
             if(std::abs(obstacle.x-55.f)<obstacle.halfWidth+7.f&&std::abs(y-(29.f+m->jump.height))<obstacle.halfHeight+7.f){
                 m->dead=true;m->deathTime=0.f;m->jump.release();m->avatar->setOpacity(140);
                 m->best=std::max(m->best,static_cast<int>(m->distance/10.f));m->displayedScore=-1;m->hint->setString("Crashed! Tap / Space to retry");

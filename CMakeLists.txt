@@ -5,12 +5,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(Versus VERSION 0.5.2 LANGUAGES C CXX)
+project(Versus VERSION 0.5.3 LANGUAGES C CXX)
+option(VERSUS_MEMBERSHIP "Build membership cosmetics instead of the standard edition" OFF)
 
 # A successful local Windows build is installed into the active Geode profile.
 if(WIN32)
     set(GEODE_DONT_INSTALL_MODS OFF CACHE BOOL
-        "Install Versus after a local Windows build" FORCE
+        "Install Versus after a local Windows build"
     )
 endif()
 
@@ -24,6 +25,7 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
 )
 add_library(${PROJECT_NAME} SHARED ${SOURCES})
+target_compile_definitions(${PROJECT_NAME} PRIVATE VERSUS_MEMBERSHIP=$<BOOL:${VERSUS_MEMBERSHIP}>)
 
 if(MSVC)
     target_compile_options(${PROJECT_NAME} PRIVATE /Z7 /FS)

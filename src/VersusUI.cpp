@@ -6,6 +6,7 @@
 #include "RoomControls.hpp"
 #include "VersusAudio.hpp"
 #include "RandomMapPolicy.hpp"
+#include "Edition.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CreatorLayer.hpp>
@@ -14,6 +15,7 @@
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/GJDifficultySprite.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
+#include <Geode/binding/ProfilePage.hpp>
 #include <Geode/ui/General.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/TextInput.hpp>
@@ -52,6 +54,14 @@ CCLabelBMFont* label(CCNode* parent, std::string const& text, CCPoint position,
     }
     parent->addChild(value);
     return value;
+}
+
+GJDifficultySprite* mapDifficulty(LevelInfo const& level) {
+    auto* face = GJDifficultySprite::create(level.autoLevel ? -1 : std::clamp(level.difficulty, 0, 10),
+        GJDifficultyName::Short);
+    // Native GD owns the glow/crown/flame geometry, offsets and child scaling.
+    if (face) face->updateFeatureState(static_cast<GJFeatureState>(std::clamp(level.featureState, 0, 4)));
+    return face;
 }
 
 // Shared rating treatment: native star sprite, never a font asterisk or new texture.
@@ -141,6 +151,16 @@ CCMenuItemSpriteExtra* button(CCMenu* parent, CCObject* target, SEL_MenuHandler 
     return item;
 }
 
+CCMenuItemSpriteExtra* iconButton(CCMenu* parent, CCObject* target, SEL_MenuHandler action,
+    char const* frame, CCPoint position, float height) {
+    auto* sprite = CCSprite::createWithSpriteFrameName(frame);
+    if (!sprite) sprite = CCSprite::createWithSpriteFrameName("GJ_infoIcon_001.png");
+    sprite->setScale(height / std::max(1.f, sprite->getContentSize().height));
+    auto* item = CCMenuItemSpriteExtra::create(sprite, target, action);
+    item->setPosition(position); parent->addChild(item);
+    return item;
+}
+
 void cascadeOpacity(CCNode* node) {
     if (auto* rgba = typeinfo_cast<CCRGBAProtocol*>(node)) rgba->setCascadeOpacityEnabled(true);
     for (auto* child : CCArrayExt<CCNode*>(node->getChildren())) cascadeOpacity(child);
@@ -200,6 +220,13 @@ std::string rulesText(GameRules const& rules) {
     return result;
 }
 
+std::string roomRulesText(GameRules const& rules) {
+    auto mode = rules.mode == 0 ? (rules.practice ? "Attempts: fewest to clear" : fmt::format("Attempts: {} lives", rules.attempts))
+        : fmt::format("Percent: first to {}%", rules.targetPercent);
+    return fmt::format("{}  |  Practice: {}  |  {}", mode, rules.practice ? "ON" : "OFF",
+        rules.sequence ? "Sequential" : "Simultaneous");
+}
+
 void readyBadge(CCNode* parent, CCPoint position, bool ready) {
     auto* badge = CCNode::create();
     badge->setPosition(position);
@@ -226,7 +253,13 @@ void readyBadge(CCNode* parent, CCPoint position, bool ready) {
 CCNode* emoteArt(std::string const& kind) {
     auto* art = CCDrawNode::create();
     ccColor4F const ink = {.12f, .18f, .27f, 1.f};
-    if (kind == "fire") {
+    if (kind == "money") {
+        CCPoint note[] = {{-15,-10},{15,-10},{15,10},{-15,10}};
+        art->drawPolygon(note, 4, {.2f,.78f,.38f,1.f}, 1.3f, ink);
+        CCPoint border[] = {{-11,-6},{11,-6},{11,6},{-11,6}};
+        art->drawPolygon(border, 4, {.5f,1.f,.66f,1.f}, .7f, ink);
+        label(art, "$", {0,0}, .63f, 15.f, ccWHITE, false, "chatFont.fnt");
+    } else if (kind == "fire") {
         CCPoint flame[] = {{0, 14}, {4, 5}, {8, 9}, {12, -2}, {8, -11}, {0, -14}, {-9, -10}, {-12, -1}, {-4, 8}};
         art->drawPolygon(flame, 9, {1.f, .39f, .16f, 1.f}, 1.f, ink);
         CCPoint center[] = {{0, 4}, {5, -4}, {2, -10}, {-4, -9}, {-5, -4}};
@@ -335,7 +368,6 @@ public:
 };
 
 class CreateRoomPopup : public Popup {
-    TextInput* m_name = nullptr;
     TextInput* m_pin = nullptr;
     CCLabelBMFont* m_privacy = nullptr;
     CCLabelBMFont* m_status = nullptr;
@@ -350,13 +382,8 @@ class CreateRoomPopup : public Popup {
         geode::addSideArt(m_mainLayer, SideArt::All, SideArtStyle::PopupBlue);
         setTitle("Create Room", "bigFont.fnt", .65f);
         label(m_mainLayer, "Room name", {155.f, 207.f}, .36f, 250.f, kIce);
-        m_name = TextInput::create(245.f, "Room name");
-        m_name->setMaxCharCount(32);
-        m_name->setCommonFilter(CommonFilter::Name);
-        m_name->setString(Service::get().profile().name + "'s Room");
-        m_name->setPosition({155.f, 181.f});
-        styleInput(m_name);
-        m_mainLayer->addChild(m_name);
+        panel(m_mainLayer, {32.f,165.f}, {246.f,32.f}, false);
+        styleNickname(label(m_mainLayer, Service::get().profile().name + "'s Room", {155.f,181.f}, .42f, 232.f));
 
         m_lockSprite = CCSprite::createWithSpriteFrameName("GJ_lockGray_001.png");
         m_lockSprite->setScale(.7f);
@@ -397,15 +424,13 @@ class CreateRoomPopup : public Popup {
             error("Enter exactly <cy>4 digits</c> for the room PIN.");
             return;
         }
-        m_name->defocus();
         m_pin->defocus();
         m_pending = true;
         enabled(m_submit, false);
         enabled(m_lock, false);
         m_closeBtn->setEnabled(false);
         m_status->setString("Creating room...");
-        auto name = std::string(m_name->getString());
-        if (name.empty()) name = Service::get().profile().name + "'s Room";
+        auto name = Service::get().profile().name + "'s Room";
         Service::get().createRoom(std::move(name), pin,
             [self = WeakRef<CreateRoomPopup>(this)](bool success, std::string detail) {
                 auto owner = self.lock();
@@ -446,7 +471,7 @@ class JoinRoomPopup : public Popup {
         m_room = std::move(room);
         geode::addSideArt(m_mainLayer, SideArt::All, SideArtStyle::PopupBlue);
         setTitle("Private Room", "bigFont.fnt", .65f);
-        label(m_mainLayer, m_room.name, {145.f, 144.f}, .45f, 240.f, kIce);
+        styleNickname(label(m_mainLayer, m_room.name, {145.f, 144.f}, .45f, 240.f, kIce));
         m_pin = TextInput::create(205.f, "4-digit PIN");
         m_pin->setCommonFilter(CommonFilter::Uint);
         m_pin->setMaxCharCount(4);
@@ -517,12 +542,12 @@ class MatchDetailPopup : public Popup {
         if (m_match.detailed) {
             player(m_mainLayer, m_match.self, {88.f, 174.f}, .55f);
             player(m_mainLayer, m_match.opponent, {285.f, 174.f}, .55f);
-            label(m_mainLayer, m_match.self.name, {107.f, 180.f}, .3f, 110.f, ccWHITE, true);
-            label(m_mainLayer, m_match.opponent.name, {304.f, 180.f}, .3f, 100.f, ccWHITE, true);
+            styleNickname(label(m_mainLayer, m_match.self.name, {107.f, 180.f}, .3f, 110.f, ccWHITE, true));
+            styleNickname(label(m_mainLayer, m_match.opponent.name, {304.f, 180.f}, .3f, 100.f, ccWHITE, true));
             label(m_mainLayer, fmt::format("Best {}%", m_match.selfStats.bestPercent), {107.f, 167.f}, .5f, 110.f, kIce, true, "chatFont.fnt");
             label(m_mainLayer, fmt::format("Best {}%", m_match.opponentStats.bestPercent), {304.f, 167.f}, .5f, 100.f, kIce, true, "chatFont.fnt");
         }
-        label(m_mainLayer, m_match.result == "draw" ? "DRAW" : m_match.winnerName + " wins", {210.f, 149.f}, .45f, 370.f, kIce, false, "chatFont.fnt");
+        styleNickname(label(m_mainLayer, m_match.result == "draw" ? "DRAW" : m_match.winnerName + " wins", {210.f, 149.f}, .45f, 370.f, kIce, false, "chatFont.fnt"));
         m_rows = CCNode::create(); m_mainLayer->addChild(m_rows);
         m_previous = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onPrevious), "<", {153.f, 21.f}, .4f);
         m_next = button(m_buttonMenu, this, menu_selector(MatchDetailPopup::onNext), ">", {267.f, 21.f}, .4f);
@@ -536,6 +561,12 @@ class MatchDetailPopup : public Popup {
         m_pageLabel->setString(fmt::format("{} / {}", m_page+1, pages).c_str());
         enabled(m_previous, m_match.detailed && m_page > 0); enabled(m_next, m_match.detailed && m_page+1 < pages);
         if (!m_match.detailed) return;
+        auto const& viewer = Service::get().profile().uid;
+        if (m_match.self.uid != viewer && m_match.opponent.uid != viewer) {
+            enabled(m_previous, false); enabled(m_next, false);
+            label(m_rows, "Attempt records are private to the players.", {210.f,92.f}, .48f, 365.f, kIce, false, "chatFont.fnt");
+            return;
+        }
         label(m_rows, "Loading attempts...", {210.f, 92.f}, .5f, 360.f, kIce, false, "chatFont.fnt");
         int generation = ++m_generation;
         Service::get().fetchAttempts(m_match, m_page*10+1,
@@ -580,11 +611,11 @@ class HistoryPopup : public Popup {
     CCMenuItemSpriteExtra* m_next = nullptr;
     std::vector<MatchRecord> m_matches;
     int m_page = 0;
-    bool init() {
+    bool init(PlayerProfile const& profile) {
         if (!Popup::init(390.f, 270.f, "GJ_square02.png")) return false;
         geode::addSideArt(m_mainLayer, SideArt::All, SideArtStyle::PopupBlue);
         setTitle("Recent Matches", "bigFont.fnt", .65f);
-        label(m_mainLayer, "YOUR LAST 10 GAMES", {195.f, 224.f}, .3f, 300.f, kIce);
+        styleNickname(label(m_mainLayer, profile.name + " - LAST 10 GAMES", {195.f, 224.f}, .3f, 335.f, kIce));
         m_rows = CCNode::create();
         m_mainLayer->addChild(m_rows);
         m_status = label(m_mainLayer, "Loading history...", {195.f, 134.f}, .45f, 330.f, kIce);
@@ -593,7 +624,7 @@ class HistoryPopup : public Popup {
         m_next = button(m_buttonMenu, this, menu_selector(HistoryPopup::onNext), ">", {251.f, 29.f}, .45f);
         enabled(m_previous, false);
         enabled(m_next, false);
-        Service::get().fetchHistory([self = WeakRef<HistoryPopup>(this)](std::vector<MatchRecord> rows, std::string detail) {
+        Service::get().fetchPlayerHistory(profile.uid, [self = WeakRef<HistoryPopup>(this)](std::vector<MatchRecord> rows, std::string detail) {
             auto owner = self.lock();
             if (!owner) return;
             if (!detail.empty()) {
@@ -629,12 +660,12 @@ class HistoryPopup : public Popup {
             std::transform(result.begin(), result.end(), result.begin(), [](unsigned char c) { return std::toupper(c); });
             auto const resultColor = result == "WIN" ? ccc3(130, 255, 165) : result == "LOSS" ? ccc3(255, 160, 160) : kIce;
             label(cell, result.empty() ? "PLAYED" : result, {8.f, 15.f}, .29f, 49.f, resultColor, true);
-            label(cell, "vs " + match.opponentName, {64.f, 20.f}, .32f, 134.f, {255, 255, 255}, true);
+            styleNickname(label(cell, "vs " + match.opponentName, {64.f, 20.f}, .32f, 134.f, {255, 255, 255}, true));
             if (match.detailed) player(cell, match.opponent, {219.f, 15.f}, .5f);
             label(cell, match.levelName, {64.f, 8.f}, .42f, 165.f, kIce, true, "chatFont.fnt");
             label(cell, "Winner", {287.f, 21.f}, .32f, 100.f, kMuted, false, "chatFont.fnt");
-            label(cell, match.winnerName.empty() ? "Draw" : match.winnerName,
-                {287.f, 10.f}, .27f, 102.f);
+            styleNickname(label(cell, match.winnerName.empty() ? "Draw" : match.winnerName,
+                {287.f, 10.f}, .27f, 102.f));
         }
     }
     void onDetails(CCObject* sender) {
@@ -644,11 +675,41 @@ class HistoryPopup : public Popup {
     void onPrevious(CCObject*) { if (m_page > 0) { --m_page; render(); } }
     void onNext(CCObject*) { ++m_page; render(); }
 public:
-    static HistoryPopup* create() {
+    static HistoryPopup* create(PlayerProfile const& profile = Service::get().profile()) {
         auto* result = new HistoryPopup;
-        if (result->init()) { result->autorelease(); return result; }
+        if (result->init(profile)) { result->autorelease(); return result; }
         delete result;
         return nullptr;
+    }
+};
+
+class PlayerPopup : public Popup {
+    PlayerProfile m_profile;
+    bool init(PlayerProfile profile) {
+        if (!Popup::init(280.f, 210.f, "GJ_square02.png")) return false;
+        m_profile = std::move(profile);
+        setTitle("Player", "bigFont.fnt", .6f);
+        player(m_mainLayer, m_profile, {140.f,140.f}, 1.05f);
+        styleNickname(label(m_mainLayer, m_profile.name, {140.f,107.f}, .52f, 240.f));
+        iconButton(m_buttonMenu, this, menu_selector(PlayerPopup::onHistory),
+            "GJ_viewListsBtn_001.png", {82.f,60.f}, 36.f);
+        iconButton(m_buttonMenu, this, menu_selector(PlayerPopup::onProfile),
+            "accountBtn_pendingRequest_001.png", {198.f,60.f}, 36.f);
+        label(m_mainLayer, "Recent matches", {82.f,28.f}, .44f, 110.f, kIce, false, "chatFont.fnt");
+        label(m_mainLayer, "GD profile", {198.f,28.f}, .44f, 110.f, kIce, false, "chatFont.fnt");
+        return true;
+    }
+    void onHistory(CCObject*) { if (auto* popup = HistoryPopup::create(m_profile)) popup->show(); }
+    void onProfile(CCObject*) {
+        if (m_profile.accountId <= 0) { error("This player does not have a GD account profile."); return; }
+        if (auto* page = ProfilePage::create(m_profile.accountId,
+            m_profile.accountId == Service::get().profile().accountId)) page->show();
+    }
+public:
+    static PlayerPopup* create(PlayerProfile const& profile) {
+        auto* result = new PlayerPopup;
+        if (result->init(profile)) { result->autorelease(); return result; }
+        delete result; return nullptr;
     }
 };
 
@@ -657,6 +718,7 @@ class GameRulesPopup : public Popup {
     std::string m_roomID;
     TextInput* m_value = nullptr;
     CCLabelBMFont* m_valueTitle = nullptr;
+    CCLabelBMFont* m_unlimited = nullptr;
     CCLabelBMFont* m_hint = nullptr;
     CCMenuItemSpriteExtra* m_mode = nullptr;
     CCMenuItemSpriteExtra* m_practice = nullptr;
@@ -664,6 +726,8 @@ class GameRulesPopup : public Popup {
     CCMenuItemSpriteExtra* m_more = nullptr;
     CCMenuItemSpriteExtra* m_save = nullptr;
     bool m_pending = false;
+    bool m_readOnly = false;
+    bool m_platformer = false;
 
     void caption(CCMenuItemSpriteExtra* item, std::string const& text, float scale = .5f,
         char const* background = "GJ_button_04.png") {
@@ -674,7 +738,9 @@ class GameRulesPopup : public Popup {
     bool init(RoomInfo const& room) {
         if (!Popup::init(330.f, 282.f, "GJ_square02.png")) return false;
         m_rules = room.rules;
-        m_rules.sequence = false;
+        m_readOnly = !Service::get().isHost() || room.started || drawingMap(room);
+        m_platformer = room.level.platformer || (room.mapSelection.random && room.mapSelection.platformer);
+        if (!m_readOnly) m_rules.sequence = false;
         m_roomID = room.id;
         geode::addSideArt(m_mainLayer, SideArt::All, SideArtStyle::PopupBlue);
         setTitle("Game Rules", "bigFont.fnt", .65f);
@@ -686,12 +752,13 @@ class GameRulesPopup : public Popup {
         m_value->setPosition({165.f, 177.f});
         styleInput(m_value);
         m_mainLayer->addChild(m_value);
+        m_unlimited = label(m_mainLayer, "Unlimited", {165.f,177.f}, .48f, 150.f, kIce);
         m_less = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onLess), "-", {95.f, 177.f}, .46f);
         m_more = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onMore), "+", {235.f, 177.f}, .46f);
         m_practice = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onPractice), "Practice: OFF", {165.f, 134.f}, .58f);
         m_hint = label(m_mainLayer, "", {165.f, 91.f}, .54f, 292.f, kMuted, false, "chatFont.fnt");
-        label(m_mainLayer, "Changing rules resets both players' Ready.", {165.f, 52.f}, .46f, 302.f, kIce, false, "chatFont.fnt");
-        m_save = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onSave), "Apply", {165.f, 25.f}, .62f);
+        label(m_mainLayer, m_readOnly ? "Current room rules - only the host can edit." : "Changing rules resets both players' Ready.", {165.f, 52.f}, .46f, 302.f, kIce, false, "chatFont.fnt");
+        m_save = button(m_buttonMenu, this, menu_selector(GameRulesPopup::onSave), m_readOnly ? "OK" : "Apply", {165.f, 25.f}, .62f);
         refresh();
         return true;
     }
@@ -710,36 +777,50 @@ class GameRulesPopup : public Popup {
     }
     void refresh() {
         caption(m_mode, m_rules.mode == 0 ? "Mode: Attempts" : "Mode: Percent", .62f);
-        m_valueTitle->setString(m_rules.mode == 0 ? "Attempt limit (1-99)" : "Target percent (1-100)");
+        bool const unlimited = m_rules.mode == 0 && m_rules.practice;
+        m_valueTitle->setString(unlimited ? "No attempt limit" : m_rules.mode == 0 ? "Attempt limit (1-99)" : "Target percent (1-100)");
         m_value->setString(std::to_string(m_rules.mode == 0 ? m_rules.attempts : m_rules.targetPercent));
+        m_value->setVisible(!unlimited);
+        m_unlimited->setVisible(unlimited);
         caption(m_practice, m_rules.practice ? "Practice: ON" : "Practice: OFF", .58f,
             m_rules.practice ? "GJ_button_01.png" : "GJ_button_04.png");
-        bool const valueEnabled = !(m_rules.mode == 0 && m_rules.practice) && !m_pending;
+        bool const valueEnabled = !(m_rules.mode == 0 && m_rules.practice) && !m_pending && !m_readOnly;
         m_value->setEnabled(valueEnabled);
         m_value->getBGSprite()->setOpacity(valueEnabled ? 230 : 105);
         enabled(m_less, valueEnabled);
         enabled(m_more, valueEnabled);
-        enabled(m_mode, !m_pending);
-        enabled(m_practice, !m_pending);
-        m_hint->setString(m_rules.mode != 0 ? "Reach the target in your current attempt." :
-            m_rules.practice ? "Clear with the fewest practice attempts." :
-            "Players play at the same time.");
+        m_less->setVisible(!m_readOnly && !unlimited);
+        m_more->setVisible(!m_readOnly && !unlimited);
+        enabled(m_mode, !m_pending && !m_readOnly);
+        enabled(m_practice, !m_pending && !m_readOnly);
+        if (m_readOnly) {
+            m_mode->setOpacity(255); m_practice->setOpacity(255);
+            m_less->setVisible(false); m_more->setVisible(false);
+            m_value->getBGSprite()->setOpacity(190);
+        }
+        m_hint->setString(m_rules.mode != 0 ? "First to target wins. Opponent may finish\ntheir current attempt to tie." :
+            m_rules.practice ? "Both players clear in practice.\nFewer attempts wins; equal attempts tie." :
+            "Highest progress within the attempt limit wins.\nBoth players play at the same time.");
     }
     void onMode(CCObject*) {
-        if (!m_pending) {
+        if (!m_pending && !m_readOnly) {
+            if (m_rules.mode == 0 && m_platformer) {
+                error("<cy>Platformer</c> maps do not support <cr>Percent mode</c>. Use Attempts mode.");
+                return;
+            }
             readValue();
             m_rules.mode = 1 - m_rules.mode;
             refresh();
         }
     }
     void onPractice(CCObject*) {
-        if (m_pending) return;
+        if (m_pending || m_readOnly) return;
         readValue();
         m_rules.practice = !m_rules.practice;
         refresh();
     }
     void adjust(int amount) {
-        if (m_pending) return;
+        if (m_pending || m_readOnly) return;
         readValue();
         if (m_rules.mode == 0) m_rules.attempts = std::clamp(m_rules.attempts + amount, 1, 99);
         else m_rules.targetPercent = std::clamp(m_rules.targetPercent + amount, 1, 100);
@@ -748,6 +829,7 @@ class GameRulesPopup : public Popup {
     void onLess(CCObject*) { adjust(-1); }
     void onMore(CCObject*) { adjust(1); }
     void onSave(CCObject*) {
+        if (m_readOnly) { onClose(nullptr); return; }
         if (m_pending || !readValue(true)) return;
         auto const& room = Service::get().room();
         if (!room || room->id != m_roomID || !Service::get().isHost() || room->started) {
@@ -845,7 +927,9 @@ class LobbyLayer : public SceneLayer {
         m_pageLabel = label(m_listPanel, "1 / 1", {72.f, 22.f}, .28f, 50.f, kIce);
         m_next = button(actions, this, menu_selector(LobbyLayer::onNext), ">", {115.f, 22.f}, .4f);
         m_create = button(actions, this, menu_selector(LobbyLayer::onCreate), "Create Room",
-            {m_listWidth - 72.f, 22.f}, .51f);
+            {m_listWidth - 102.f, 22.f}, .48f);
+        m_retry = iconButton(actions, this, menu_selector(LobbyLayer::onRetry), "GJ_updateBtn_001.png",
+            {m_listWidth - 24.f, 22.f}, 28.f);
         enabled(m_previous, false);
         enabled(m_next, false);
         enabled(m_create, false);
@@ -855,10 +939,9 @@ class LobbyLayer : public SceneLayer {
         m_stats = CCNode::create();
         m_statsPanel->addChild(m_stats);
         auto* statsActions = menu(m_statsPanel);
-        m_history = button(statsActions, this, menu_selector(LobbyLayer::onHistory), "Recent Matches",
-            {statsWidth / 2.f, 48.f}, .40f);
-        m_retry = button(statsActions, this, menu_selector(LobbyLayer::onRetry), "Refresh",
-            {statsWidth / 2.f, 21.f}, .44f, "GJ_button_04.png");
+        m_history = iconButton(statsActions, this, menu_selector(LobbyLayer::onHistory), "GJ_viewListsBtn_001.png",
+            {statsWidth / 2.f, 41.f}, 35.f);
+        label(m_statsPanel, "Recent matches", {statsWidth / 2.f, 15.f}, .38f, statsWidth - 16.f, kIce, false, "chatFont.fnt");
         enabled(m_history, false);
         refreshStats();
         return true;
@@ -992,10 +1075,10 @@ class LobbyLayer : public SceneLayer {
             float const nameWidth = infoWidth * .53f;
             float const badgeWidth = infoWidth - nameWidth - 7.f;
             float const badgeX = 57.f + nameWidth + 7.f;
-            label(rowSprite, room.host.name, {57.f, rowHeight * .68f}, .32f,
-                nameWidth, {255, 255, 255}, true);
-            label(rowSprite, room.name, {57.f, rowHeight * .31f}, .39f,
-                nameWidth, kIce, true, "chatFont.fnt");
+            styleNickname(label(rowSprite, room.host.name, {57.f, rowHeight * .68f}, .32f,
+                nameWidth, {255, 255, 255}, true));
+            styleNickname(label(rowSprite, room.name, {57.f, rowHeight * .31f}, .39f,
+                nameWidth, kIce, true, "chatFont.fnt"));
             auto* modeBadge = NineSlice::create("square02b_001.png");
             modeBadge->setContentSize({badgeWidth, rowHeight - 10.f});
             modeBadge->setColor(room.rules.mode == 1 ? ccc3(23, 68, 119) : ccc3(7, 56, 85));
@@ -1029,8 +1112,8 @@ class LobbyLayer : public SceneLayer {
         m_statsRate = profile.winRate;
         float const width = m_statsPanel->getContentSize().width;
         player(m_stats, profile, {width / 2.f, m_height - 68.f}, 1.4f);
-        label(m_stats, profile.name.empty() ? "Player" : profile.name,
-            {width / 2.f, m_height - 102.f}, .53f, width - 20.f);
+        styleNickname(label(m_stats, profile.name.empty() ? "Player" : profile.name,
+            {width / 2.f, m_height - 102.f}, .53f, width - 20.f));
         label(m_stats, "WIN RATE", {width / 2.f, m_height - 128.f}, .27f, width - 22.f, kIce);
         label(m_stats, rate(profile), {width / 2.f, m_height - 148.f}, .76f, width - 22.f);
         label(m_stats, fmt::format("Last {} / 10 matches", std::clamp(profile.recentGames, 0, 10)),
@@ -1158,6 +1241,49 @@ class RoomLayer : public SceneLayer {
     std::string m_readyRoomID;
     bool m_opponentReadyKnown = false;
     bool m_lastOpponentReady = false;
+    struct DownloadWidgets {
+        CCLabelBMFont* caption = nullptr;
+        CCLabelBMFont* detail = nullptr;
+        CCLayerColor* fill = nullptr;
+        float width = 0.f;
+        std::string key;
+    } m_downloads[2];
+    float m_progressElapsed = 0.f;
+
+    void updateDownloads(RoomInfo const& room) {
+        bool const ownHost = Service::get().isHost();
+        for (int i = 0; i < 2; ++i) {
+            auto& widget = m_downloads[i];
+            if (!widget.caption || !widget.detail || !widget.fill) continue;
+            bool const seatHost = i == 0 ? ownHost : !ownHost;
+            auto const* profile = seatHost ? &room.host : (room.guest ? &*room.guest : nullptr);
+            auto const& shared = seatHost ? room.hostDownload : room.guestDownload;
+            bool known = i == 0 || (profile && shared.uid == profile->uid && shared.levelId == room.level.id);
+            MapDownloadProgress progress;
+            if (i == 0 && room.level.id > 0) progress = mapDownloadProgress(room.level.id);
+            else if (known) {
+                progress.mapReady = shared.mapReady; progress.percent = std::clamp(shared.percent, 0, 100);
+                progress.songsDone = shared.songsDone; progress.songsTotal = shared.songsTotal;
+                progress.soundsDone = shared.soundsDone; progress.soundsTotal = shared.soundsTotal;
+            }
+            bool const stale = i != 0 && known && !progress.complete() && Service::get().serverNow() - shared.updatedAt > 25000;
+            auto title = room.level.id <= 0 ? "Downloads: waiting" : !known ? "Downloads: syncing" :
+                fmt::format("{} {}%", progress.complete() ? "Ready" : "Download", progress.percent);
+            auto detail = room.level.id <= 0 ? "Select a map first" : !known ? "Waiting for player info" : stale ? "Sync delayed" :
+                !progress.mapReady ? "Map ... | Music / SFX pending" :
+                fmt::format("Map OK | Music {}/{} | SFX {}/{}", progress.songsDone, progress.songsTotal, progress.soundsDone, progress.soundsTotal);
+            auto key = title + ":" + detail;
+            if (widget.key == key) continue;
+            widget.key = std::move(key);
+            widget.caption->setString(title.c_str());
+            widget.caption->setScale(std::min(.28f, widget.width / std::max(1.f, widget.caption->getContentSize().width)));
+            widget.detail->setString(detail.c_str());
+            widget.detail->setScale(std::min(.37f, widget.width / std::max(1.f, widget.detail->getContentSize().width)));
+            auto color = progress.complete() && known ? ccc3(135,255,175) : stale ? ccc3(255,210,125) : kIce;
+            widget.caption->setColor(color); widget.fill->setColor(color);
+            widget.fill->setScaleX(room.level.id > 0 && known ? progress.percent / 100.f : 0.f);
+        }
+    }
 
     void requestRender() {
         if (m_renderQueued || m_transitioning) return;
@@ -1245,7 +1371,7 @@ class RoomLayer : public SceneLayer {
         addChild(m_content);
         m_emotes = CCNode::create();
         addChild(m_emotes, 30);
-        m_status = label(this, "", {m_window.width / 2.f, 10.f}, .3f, m_window.width - 40.f, kIce);
+        m_status = label(this, "", {m_window.width / 2.f, 10.f}, .52f, m_window.width - 40.f, kIce, false, "chatFont.fnt");
         render();
         return true;
     }
@@ -1263,11 +1389,11 @@ class RoomLayer : public SceneLayer {
             room.hostReady, rulesText(room.rules), m_cached, m_downloading, m_cacheError) +
             fmt::format(":{}:{}:{}:{}:{}", room.mapSelection.random, room.mapSelection.mask,
                 room.mapSelection.platformer, room.mapDraw ? room.mapDraw->id : "", room.mapDraw && room.mapDraw->settled) +
-            fmt::format(":{}:{}:{}", room.level.creator, roomWins(room, true), roomWins(room, false)) +
+            fmt::format(":{}:{}:{}:{}", room.level.creator, room.level.featureState, roomWins(room, true), roomWins(room, false)) +
             (room.battle ? fmt::format(":{}:{}:{}", room.battle->finishedAt, room.battle->hostReturned, room.battle->guestReturned) : "");
     }
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
-        CCPoint origin, CCSize size, bool host, bool ready, int wins, bool checkingResult = false) {
+        CCPoint origin, CCSize size, bool host, bool ready, int wins, int seat, bool checkingResult = false) {
         auto* card = panel(parent, origin, size, false);
         label(card, fmt::format("Win : {}", wins), {size.width / 2.f, size.height - 13.f}, .60f, size.width - 12.f,
             ccWHITE, false, "goldFont.fnt");
@@ -1277,10 +1403,19 @@ class RoomLayer : public SceneLayer {
                     .32f, size.width - 12.f, kIce);
             } else player(card, *profile, {size.width / 2.f, size.height - 46.f}, 1.3f);
             readyBadge(card, {size.width / 2.f, size.height - 73.f}, ready);
-            label(card, profile->name, {size.width / 2.f, size.height - 94.f}, .45f, size.width - 16.f);
-            label(card, host ? "HOST" : "CHALLENGER", {size.width / 2.f, 43.f}, .22f, size.width - 15.f, kIce);
-            label(card, rate(*profile), {size.width / 2.f, 25.f}, .53f, size.width - 15.f);
-            label(card, "LAST 10 WIN RATE", {size.width / 2.f, 10.f}, .20f, size.width - 12.f, kMuted);
+            auto* nameSprite = CCSprite::create(); nameSprite->setContentSize({size.width - 12.f, 21.f});
+            styleNickname(label(nameSprite, profile->name, nameSprite->getContentSize() / 2.f, .43f, size.width - 18.f));
+            auto* name = CCMenuItemSpriteExtra::create(nameSprite, this, menu_selector(RoomLayer::onPlayer));
+            name->setTag(host ? 0 : 1); name->setPosition({size.width / 2.f, size.height - 94.f}); menu(card)->addChild(name);
+            label(card, fmt::format("{} / 10G WR {}", host ? "HOST" : "GUEST", rate(*profile)),
+                {size.width / 2.f, 44.f}, .39f, size.width - 12.f, kMuted, false, "chatFont.fnt");
+            auto& progress = m_downloads[seat]; progress.width = size.width - 12.f;
+            progress.caption = label(card, "", {size.width / 2.f, 29.f}, .28f, progress.width, kIce);
+            auto* track = CCLayerColor::create(ccc4(15,34,65,255), progress.width, 4.f);
+            track->setPosition({6.f,18.f}); card->addChild(track);
+            progress.fill = CCLayerColor::create(ccc4(155,225,255,255), progress.width, 4.f);
+            progress.fill->setPosition({6.f,18.f}); progress.fill->setScaleX(0.f); card->addChild(progress.fill);
+            progress.detail = label(card, "", {size.width / 2.f, 8.f}, .37f, progress.width, kIce, false, "chatFont.fnt");
         } else {
             // Empty seats use a vector silhouette instead of a missing sprite frame.
             auto* placeholder = CCDrawNode::create();
@@ -1321,13 +1456,14 @@ class RoomLayer : public SceneLayer {
         m_signature = signature(room);
         m_readyGlow = nullptr;
         m_readySprite = nullptr;
+        for (auto& widgets : m_downloads) widgets = {};
         m_content->removeAllChildrenWithCleanup(true);
         float const width = std::min(550.f, m_window.width - 44.f);
         float const height = std::min(250.f, m_window.height - 65.f);
         auto* frame = panel(m_content, {(m_window.width - width) / 2.f, (m_window.height - height) / 2.f - 8.f}, {width, height});
-        label(frame, room.name, {width / 2.f, height - 17.f}, .46f, width - 56.f, kIce);
-        label(frame, rulesText(room.rules), {width / 2.f, height - 36.f}, .50f,
-            width - 75.f, ccc3(160, 220, 200), false, "chatFont.fnt");
+        styleNickname(label(frame, room.name, {width / 2.f, height - 17.f}, .46f, width - 56.f, kIce));
+        auto* roomHint = label(frame, "", {width / 2.f, height - 36.f}, .45f,
+            width - 75.f, kIce, false, "chatFont.fnt");
         if (room.privateRoom) {
             auto* lock = CCSprite::createWithSpriteFrameName("GJ_lockGray_001.png");
             lock->setScale(.38f);
@@ -1341,11 +1477,11 @@ class RoomLayer : public SceneLayer {
         if (!mine) mine = Service::get().profile();
         bool const myReady = host ? room.hostReady : room.guestReady;
         bool const opponentReady = host ? room.guestReady : room.hostReady;
-        playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, host, myReady, roomWins(room, host));
+        playerCard(frame, mine, {12.f, 48.f}, {cardWidth, cardHeight}, host, myReady, roomWins(room, host), 0);
         bool const opponentChecking = room.battle && room.battle->finishedAt > 0 &&
             (host ? !room.battle->guestReturned : !room.battle->hostReturned);
         playerCard(frame, opponent, {width - cardWidth - 12.f, 48.f}, {cardWidth, cardHeight},
-            !host, opponentReady, roomWins(room, !host), opponentChecking);
+            !host, opponentReady, roomWins(room, !host), 1, opponentChecking);
         float const centerWidth = width - 2.f * cardWidth - 40.f;
         float const centerX = width / 2.f;
         if (!room.level.id && room.mapSelection.random) {
@@ -1360,10 +1496,7 @@ class RoomLayer : public SceneLayer {
                 selected->setColor(ccc3(255, 150, 50)); selected->setOpacity(38);
                 frame->addChild(selected);
             }
-            // The native sprite's NA/Auto values are reversed from GJDifficulty.
-            int const difficulty = room.level.id
-                ? (room.level.autoLevel ? -1 : std::clamp(room.level.difficulty, 0, 10)) : 0;
-            auto* face = GJDifficultySprite::create(difficulty, GJDifficultyName::Short);
+            auto* face = mapDifficulty(room.level);
             if (face) {
                 face->setScale(.90f);
                 face->setPosition({centerX, height - 79.f});
@@ -1372,8 +1505,9 @@ class RoomLayer : public SceneLayer {
             label(frame, room.level.id ? room.level.name : "Choose a map",
                 {centerX, height - 114.f}, .45f, centerWidth);
             if (room.level.id) {
-                label(frame, room.level.creator.empty() ? "Unknown creator" : room.level.creator,
-                    {centerX, height - 132.f}, .42f, centerWidth, ccWHITE, false, "goldFont.fnt");
+                styleNickname(label(frame, room.level.creator.empty() ? "Unknown creator" : room.level.creator,
+                    {centerX, height - 132.f}, .42f, centerWidth, ccWHITE, false,
+                    isMembershipEdition() ? "bigFont.fnt" : "goldFont.fnt"));
                 starRating(frame, std::to_string(room.level.stars), {centerX, height - 148.f}, .36f, centerWidth);
             } else {
                 label(frame, "A map for your duel", {centerX, height - 135.f}, .39f,
@@ -1405,23 +1539,20 @@ class RoomLayer : public SceneLayer {
             frame->addChild(m_readyGlow, 4);
             animateReady();
         }
+        auto* gear = iconButton(actions, this, menu_selector(RoomLayer::onRules), "GJ_optionsBtn_001.png",
+            {centerX + 66.f, 80.f}, 23.f);
+        label(frame, "Rules", {centerX + 66.f, 62.f}, .40f, 64.f, kIce, false, "chatFont.fnt");
+        enabled(gear, !m_pending);
         if (host) {
             auto* choose = button(actions, this, menu_selector(RoomLayer::onChoose), "Map Mode",
-                {centerX - 18.f, 84.f}, .46f, "GJ_button_04.png");
-            auto* gearSprite = CCSprite::createWithSpriteFrameName("GJ_optionsBtn_001.png");
-            gearSprite->setScale(.5f);
-            auto* gear = CCMenuItemSpriteExtra::create(gearSprite, this, menu_selector(RoomLayer::onRules));
-            gear->setPosition({centerX + 66.f, 84.f});
-            actions->addChild(gear);
-            label(frame, "Game Rule", {centerX + 66.f, 64.f}, .40f, 82.f, kIce, false, "chatFont.fnt");
-            enabled(gear, !m_pending && !Service::get().busy() && !room.started && !drawingMap(room));
+                {centerX - 24.f, 80.f}, .46f, "GJ_button_04.png");
             auto* start = button(actions, this, menu_selector(RoomLayer::onStart), room.battle && room.battle->finishedAt ? "Finishing" : room.started ? "Preparing" : needsRandomDraw(room) ? "Roll" : "Start",
                 {width - cardWidth / 2.f - 12.f, 24.f}, .57f);
             enabled(choose, !m_pending && !Service::get().busy() && !room.started && !drawingMap(room));
             enabled(start, !m_pending && !Service::get().busy() && !room.started && room.guest.has_value() &&
                 !drawingMap(room) && room.hostReady && room.guestReady && ((room.level.id > 0 && m_cached) || needsRandomDraw(room)));
         } else {
-            label(frame, "Host chooses the map and rules", {centerX, 84.f}, .36f, centerWidth, kIce, false, "chatFont.fnt");
+            label(frame, "Host selects map", {centerX - 25.f, 80.f}, .42f, centerWidth - 75.f, kIce, false, "chatFont.fnt");
             label(frame, "Host starts", {width - cardWidth / 2.f - 12.f, 24.f}, .30f, cardWidth - 12.f, kMuted);
         }
         if (room.level.id > 0 && !m_cached) {
@@ -1431,8 +1562,9 @@ class RoomLayer : public SceneLayer {
         } else label(frame, room.level.id > 0 ? "Map and audio ready" : room.mapSelection.random ? (room.mapSelection.platformer ? "Rated / Platformer" : "Rated / Classic") : "No map selected",
             {centerX, 55.f}, .32f, centerWidth, m_cached ? ccc3(145, 255, 185) : kMuted, false, "chatFont.fnt");
 
-        static char const* kinds[] = {"like", "smile", "angry", "fire"};
-        for (int i = 0; i < 4; ++i) {
+        static char const* kinds[] = {"like", "smile", "angry", "fire", "money"};
+        int const emoteCount = isMembershipEdition() ? 5 : 4;
+        for (int i = 0; i < emoteCount; ++i) {
             auto* sprite = CCSprite::create();
             sprite->setContentSize({29.f, 29.f});
             auto* bg = NineSlice::create("square02b_001.png");
@@ -1446,7 +1578,7 @@ class RoomLayer : public SceneLayer {
             sprite->addChild(art);
             auto* item = CCMenuItemSpriteExtra::create(sprite, this, menu_selector(RoomLayer::onEmote));
             item->setTag(i);
-            item->setPosition({centerX + (i - 1.5f) * 32.f, 22.f});
+            item->setPosition({centerX + (i - (emoteCount - 1) / 2.f) * 32.f, 22.f});
             actions->addChild(item);
             enabled(item, room.guest.has_value() && !room.started);
         }
@@ -1457,15 +1589,22 @@ class RoomLayer : public SceneLayer {
             !myReady ? "Press Ready after your map finishes downloading" :
             !opponent ? "Ready - waiting for an opponent" : !opponentReady ? "Ready - waiting for the other player" :
             host ? "Both players ready - press Start" : "Both players ready - waiting for the host";
-        m_status->setString(status.c_str());
-        m_status->setScale(.3f);
-        if (m_status->getContentSize().width * .3f > m_window.width - 40.f)
-            m_status->setScale((m_window.width - 40.f) / m_status->getContentSize().width);
+        roomHint->setString(status.c_str());
+        roomHint->setScale(std::min(.45f, (width - 48.f) / std::max(1.f, roomHint->getContentSize().width)));
+        m_status->setString(roomRulesText(room.rules).c_str());
+        m_status->setScale(std::min(.55f, (m_window.width - 40.f) / std::max(1.f, m_status->getContentSize().width)));
+        updateDownloads(room);
     }
     void onRules(CCObject*) {
         auto const& room = Service::get().room();
-        if (m_pending || Service::get().busy() || !room || !Service::get().isHost() || room->started) return;
+        if (m_pending || !room) return;
         if (auto* popup = GameRulesPopup::create(*room)) popup->show();
+    }
+    void onPlayer(CCObject* sender) {
+        auto const& room = Service::get().room();
+        if (!room || m_transitioning) return;
+        auto const* profile = sender->getTag() == 0 ? &room->host : (room->guest ? &*room->guest : nullptr);
+        if (profile) if (auto* popup = PlayerPopup::create(*profile)) popup->show();
     }
     void onDownload(CCObject*) {
         if (!m_downloading) {
@@ -1477,9 +1616,9 @@ class RoomLayer : public SceneLayer {
     void onEmote(CCObject* sender) {
         auto const& room = Service::get().room();
         if (m_sendingEmote || m_emoteCooldown > 0.f || !room || !room->guest || room->started) return;
-        static char const* kinds[] = {"like", "smile", "angry", "fire"};
+        static char const* kinds[] = {"like", "smile", "angry", "fire", "money"};
         int const tag = static_cast<CCNode*>(sender)->getTag();
-        if (tag < 0 || tag >= 4) return;
+        if (tag < 0 || tag >= (isMembershipEdition() ? 5 : 4)) return;
         m_sendingEmote = true;
         m_emoteCooldown = 1.f;
         Service::get().sendEmote(kinds[tag], [self = WeakRef<RoomLayer>(this)](bool success, std::string detail) {
@@ -1566,6 +1705,11 @@ public:
         m_readyPhase = std::fmod(m_readyPhase + dt * 2.f, 6.2831853f);
         animateReady();
         m_emoteCooldown = std::max(0.f, m_emoteCooldown - dt);
+        m_progressElapsed += dt;
+        if (m_progressElapsed >= .25f) {
+            m_progressElapsed = 0.f;
+            if (auto const& room = Service::get().room()) updateDownloads(*room);
+        }
         m_elapsed += dt;
         if (m_elapsed < 1.f) return;
         m_elapsed = 0.f;

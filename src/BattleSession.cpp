@@ -1,6 +1,7 @@
 #include "BattleSession.hpp"
 #include "BattleProgress.hpp"
 #include "BattleHUD.hpp"
+#include "Edition.hpp"
 #include "MapCache.hpp"
 #include "SpectatorRunner.hpp"
 #include "VersusAudio.hpp"
@@ -127,7 +128,7 @@ public:
     BattlePlayerState other;
     BattleInfo finalResult;
     bool host = false, active = false, releasing = false, startingTurn = false;
-    bool reporting = false, dirty = false, forcingQuit = false, mainMenu = false;
+    bool reporting = false, dirty = false, forcingQuit = false;
     bool quitDialog = false, warnedPause = false, leaving = false, timedOut = false;
     bool finished = false, spectating = false, returning = false, resultVisible = false;
     bool winnerRevealed = false, executionRevealed = false, confirmationVisible = false;
@@ -241,7 +242,7 @@ public:
         // which can run other mods' teardown hooks during level construction.
         play = nullptr;
         play = layer;
-        active = true; finished = false; leaving = false; timedOut = false; mainMenu = false; forcingQuit = false;
+        active = true; finished = false; leaving = false; timedOut = false; forcingQuit = false;
         reporting = false; dirty = true; quitDialog = false; warnedPause = false;
         returning = false; resultVisible = false;
         winnerRevealed = false; executionRevealed = false; confirmationVisible = false;
@@ -366,11 +367,10 @@ public:
         leaving = leaveRoom;
         timedOut = !leaveRoom;
         if (leaveRoom) resultBegan = Clock::now();
+        if (auto game = runner.lock()) game->removeFromParent(); runner = nullptr;
         report(true);
-        if (!leaveRoom) {
-            if (auto owner = play.lock()) dismissPause(owner.data());
-        }
-        label(status, leaveRoom ? "Leaving match..." : "Pause limit reached. Waiting for result...");
+        if (auto owner = play.lock()) dismissPause(owner.data());
+        label(status, leaveRoom ? "Forfeiting. Returning to the room..." : "Pause limit reached. Waiting for result...");
     }
     bool askQuit(PlayLayer* layer) {
         if (!owns(layer) || forcingQuit) return false;
@@ -443,6 +443,7 @@ public:
         auto* title = CCLabelBMFont::create(info.draw ? "DRAW" : (winnerName + " WINS!").c_str(), "bigFont.fnt");
         title->setPosition({window.width / 2.f, window.height / 2.f + 94.f});
         title->limitLabelWidth(window.width - 40.f, .75f, .3f);
+        if (!info.draw) styleNickname(title);
         decision->addChild(title, 10);
         auto resultLabel = [window](CCNode* parent, std::string text, float x, float y, float width, float scale,
                                             char const* font = "chatFont.fnt") {
@@ -459,8 +460,8 @@ public:
         guestPreview->setPosition({window.width / 2.f + 95.f, window.height / 2.f - 10.f});
         progress->addChild(hostPreview);
         progress->addChild(guestPreview);
-        resultLabel(progress, hostProfile.name, -95.f, -56.f, 170.f, .85f);
-        resultLabel(progress, guestProfile.name, 95.f, -56.f, 170.f, .85f);
+        styleNickname(resultLabel(progress, hostProfile.name, -95.f, -56.f, 170.f, .85f));
+        styleNickname(resultLabel(progress, guestProfile.name, 95.f, -56.f, 170.f, .85f));
         hostPercent = resultLabel(progress, "0%", -95.f, -79.f, 140.f, .5f, "bigFont.fnt");
         if (auto value = hostPercent.lock()) value->setColor(
             info.draw || info.winnerUid == hostProfile.uid ? ccc3(179, 237, 255) : ccc3(235, 235, 235));
@@ -633,7 +634,8 @@ public:
             return text;
         };
         popupLabel("MATCH RESULT", 0.f, 76.f, panelWidth - 24.f, .48f);
-        popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 0.f, 55.f, panelWidth - 24.f, .55f);
+        auto* resultTitle = popupLabel(info.draw ? "DRAW" : winnerName + " WINS!", 0.f, 55.f, panelWidth - 24.f, .55f);
+        if (!info.draw) styleNickname(resultTitle);
 
         constexpr float playerX = 82.f;
         auto* hostResultIcon = icon(hostProfile,
@@ -648,8 +650,8 @@ public:
         popup->addChild(hostResultIcon, 3);
         popup->addChild(guestResultIcon, 3);
         popupLabel("VS", 0.f, 8.f, 38.f, .42f);
-        popupLabel(hostProfile.name, -playerX, -25.f, 125.f, .48f, "chatFont.fnt");
-        popupLabel(guestProfile.name, playerX, -25.f, 125.f, .48f, "chatFont.fnt");
+        styleNickname(popupLabel(hostProfile.name, -playerX, -25.f, 125.f, .48f, "chatFont.fnt"));
+        styleNickname(popupLabel(guestProfile.name, playerX, -25.f, 125.f, .48f, "chatFont.fnt"));
         auto* hostScore = popupLabel(fmt::format("{}%", info.host.bestPercent),
             -playerX, -44.f, 100.f, .42f);
         auto* guestScore = popupLabel(fmt::format("{}%", info.guest.bestPercent),
@@ -777,15 +779,21 @@ public:
     }
     void exitAfterResult() {
         if (!active || forcingQuit || returning) return;
+        // Do not lose the forfeit report by tearing down the session first.
+        // Leaving a Versus map leaves the match, never the room itself.
+        if (leaving && sameBattle() && Service::get().room()->battle->finishedAt <= 0) {
+            report(true);
+            returnRetry = 1.f;
+            return;
+        }
         auto quit = [this] {
-            forcingQuit = true; mainMenu = leaving;
+            forcingQuit = true;
             audio::stopResultMusic();
             auto owner = play.lock();
-            if (leaving) Service::get().leaveRoom([](bool, std::string) {});
             if (owner) owner->onQuit();
             active = false;
         };
-        if (leaving || !sameBattle()) { quit(); return; }
+        if (!sameBattle()) { quit(); return; }
         returning = true; auto epoch = generation;
         Service::get().acknowledgeResult([this, epoch, quit](bool ok, std::string detail) {
             if (epoch != generation) return;
@@ -905,7 +913,4 @@ bool allowPracticeToggle(PlayLayer* layer, bool practice) {
     auto& s = Session::get(); return !s.owns(layer) || s.releasing || practice == s.rules.practice;
 }
 bool requestQuit(PlayLayer* layer) { return Session::get().askQuit(layer); }
-bool consumeMainMenuReturn() {
-    auto& s = Session::get(); bool value = s.mainMenu; s.mainMenu = false; return value;
-}
 }

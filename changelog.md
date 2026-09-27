@@ -1,3 +1,14 @@
+# v0.5.3
+
+- Show local and opponent map/music/SFX preparation percentages, progress bars and completed-file counts.
+- Explain all battle rules in a dedicated popup, correct the normal/hard star filters, and prevent Percent mode on Platformer maps.
+- Use native Featured/Epic/Legendary/Mythic difficulty decorations in room selection and roulette.
+- Add clickable room player names with recent-match and GD-profile buttons, update lobby icons, and use fixed nickname-based room names.
+- Fix stale timeout-result polling that trapped spectators in the runner; keep the room when quitting or forfeiting a Versus match.
+- Replace the runner bat with the original animated GD object 1584 and bound the retained level cache for lower-memory devices.
+- Publish separate standard and membership Windows/Android packages. Membership adds green-to-white nicknames and the money emote. Install only one edition.
+- Publish the updated Firebase rules before using shared preparation progress, opponent history or new metadata.
+
 # v0.5.2
 
 - Replace the random-room NA placeholder with all selected difficulty faces and their exact star choices, wrapping up to ten filters into two centered rows.

@@ -1,4 +1,5 @@
 #include "BattleHUD.hpp"
+#include "Edition.hpp"
 #include <Geode/binding/GameManager.hpp>
 #include <Geode/binding/SimplePlayer.hpp>
 #include <algorithm>
@@ -89,6 +90,7 @@ struct Card {
         };
         auto* name = makeLabel(player.name.c_str(), {edge, 41.f}, ccWHITE);
         name->limitLabelWidth(textWidth, .32f, .14f);
+        styleNickname(name);
 
         bool const lives = rules.mode == 0 && !rules.practice;
         heart = lifeHeart(16.f);

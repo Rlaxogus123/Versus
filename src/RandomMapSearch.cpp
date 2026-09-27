@@ -141,8 +141,7 @@ public:
         search->m_page = page;
         search->m_starFilter = true;
         search->m_length = filter.platformer ? "5" : "0,1,2,3,4";
-        // User's star groupings differ from GD's difficulty labels (4* and 5*
-        // are both native Hard). Query broadly, then enforce exact stars above.
+        // 4* and 5* share native Hard; enforce exact selected stars afterward.
         search->m_difficulty = std::to_string(group.query.difficulty);
         search->m_demonFilter = static_cast<GJDifficulty>(group.query.demonFilter);
         key = search->getKey();

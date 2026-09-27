@@ -4,6 +4,7 @@
 #include <Geode/utils/async.hpp>
 #include "VersusService.hpp"
 #include "VersusUI.hpp"
+#include "Edition.hpp"
 
 using namespace geode::prelude;
 
@@ -60,6 +61,7 @@ void checkVersusVersion() {
 }
 
 $on_mod(Loaded) {
+    log::info("{}", versus::editionMarker());
     versus::Service::get().initialize();
     checkVersusVersion();
 }

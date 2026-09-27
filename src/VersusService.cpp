@@ -5,6 +5,8 @@
 #include "RandomMapPolicy.hpp"
 #include "RandomMapSearch.hpp"
 #include "RoomScore.hpp"
+#include "MapCache.hpp"
+#include "Edition.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -65,6 +67,7 @@ struct State {
     Clock::time_point returnRequestedAt, nextReturnAttempt;
     Clock::time_point nextAttemptWrite;
     Clock::time_point nextDrawAttempt;
+    Clock::time_point nextDownloadReport;
     std::deque<PendingAttempt> attempts;
     std::unordered_set<std::string> recordedMatches;
     std::vector<Done> connectCallbacks;
@@ -279,13 +282,15 @@ void resolveBattle(Json& body, std::string const& actorUid) {
 }
 LevelInfo parseLevel(Json const& value) {
     return {intAt(value, "id"), stringAt(value, "name"), static_cast<int>(intAt(value, "difficulty")),
-        static_cast<int>(intAt(value, "stars")), boolAt(value, "demon"), boolAt(value, "autoLevel"), boolAt(value, "platformer"), stringAt(value, "creator")};
+        static_cast<int>(intAt(value, "stars")), boolAt(value, "demon"), boolAt(value, "autoLevel"), boolAt(value, "platformer"), stringAt(value, "creator"),
+        static_cast<int>(std::clamp<int64_t>(intAt(value, "featureState"), 0, 4))};
 }
 Json levelJson(LevelInfo const& level) {
     auto value = Json::object(); value["id"] = level.id; value["name"] = level.name;
     value["difficulty"] = level.autoLevel ? -1 : level.difficulty; value["stars"] = level.stars;
     value["demon"] = level.demon; value["autoLevel"] = level.autoLevel; value["platformer"] = level.platformer;
     value["creator"] = level.creator;
+    value["featureState"] = level.featureState;
     return value;
 }
 MapSelection parseMapSelection(Json const& value) {
@@ -299,6 +304,19 @@ RoomInfo parseRoom(std::string id, Json const& value) {
     result.host = parseProfile(value["host"]);
     if (hasRoomGuest(value)) result.guest = parseProfile(value["guest"]);
     result.level = parseLevel(value["level"]);
+    auto download = [](Json const& item) {
+        RoomInfo::DownloadInfo result;
+        result.uid = stringAt(item, "uid"); result.levelId = intAt(item, "levelId");
+        result.updatedAt = intAt(item, "updatedAt");
+        result.percent = static_cast<int>(intAt(item, "percent")); result.mapReady = boolAt(item, "mapReady");
+        result.songsDone = static_cast<int>(intAt(item, "songsDone"));
+        result.songsTotal = static_cast<int>(intAt(item, "songsTotal"));
+        result.soundsDone = static_cast<int>(intAt(item, "soundsDone"));
+        result.soundsTotal = static_cast<int>(intAt(item, "soundsTotal"));
+        return result;
+    };
+    result.hostDownload = download(value["downloads"]["host"]);
+    result.guestDownload = download(value["downloads"]["guest"]);
     result.mapSelection = parseMapSelection(value["mapSelection"]);
     result.hostWins = static_cast<int>(intAt(value["score"], "host"));
     result.guestWins = static_cast<int>(intAt(value["score"], "guest"));
@@ -552,6 +570,45 @@ void pollRoom() {
         adoptRoom(id, body);
     });
 }
+void reportDownload() {
+    auto& s = state();
+    if (!s.room || s.writing || s.polling || s.authenticating ||
+        (s.room->started && (!s.room->launch || s.room->launch->releasedAt > 0)) ||
+        s.room->level.id <= 0 || Clock::now() < s.nextDownloadReport) return;
+    s.nextDownloadReport = Clock::now() + std::chrono::seconds(2);
+    auto const levelID = s.room->level.id;
+    auto const progress = mapDownloadProgress(levelID);
+    bool const host = s.room->host.uid == s.profile.uid;
+    auto const& own = host ? s.room->hostDownload : s.room->guestDownload;
+    if (own.uid == s.profile.uid && own.levelId == levelID && own.percent == progress.percent &&
+        own.mapReady == progress.mapReady && own.songsDone == progress.songsDone &&
+        own.songsTotal == progress.songsTotal && own.soundsDone == progress.soundsDone &&
+        own.soundsTotal == progress.soundsTotal && (progress.complete() || nowMs() - own.updatedAt < 10000)) return;
+    auto const epoch = s.epoch;
+    s.writing = s.maintenanceWriting = true;
+    mutateRoom(s.room->id, epoch, [levelID, progress](Json& body) -> std::string {
+        auto const uid = state().profile.uid;
+        bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
+        if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
+        if ((boolAt(body, "started") && intAt(std::as_const(body)["launch"], "releasedAt") > 0) ||
+            intAt(std::as_const(body)["level"], "id") != levelID) return ROOM_UNCHANGED;
+        auto value = Json::object();
+        value["uid"] = uid; value["levelId"] = levelID; value["percent"] = progress.percent;
+        value["mapReady"] = progress.mapReady;
+        value["songsDone"] = progress.songsDone; value["songsTotal"] = progress.songsTotal;
+        value["soundsDone"] = progress.soundsDone; value["soundsTotal"] = progress.soundsTotal;
+        value["updatedAt"] = timestamp();
+        body["downloads"][host ? "host" : "guest"] = value;
+        return {};
+    }, [epoch](bool ok, std::string detail) {
+        if (epoch != state().epoch) return;
+        state().writing = state().maintenanceWriting = false;
+        if (!ok) {
+            state().nextDownloadReport = Clock::now() + std::chrono::seconds(10);
+            log::warn("Versus download progress sync: {}", detail);
+        }
+    });
+}
 void heartbeat() {
     auto& s = state();
     if (!s.room || s.writing || s.polling) return;
@@ -686,9 +743,21 @@ void Service::fetchRooms(RoomListCallback callback) {
     });
 }
 void Service::fetchHistory(HistoryCallback callback) {
-    connect([callback = std::move(callback)](bool ok, std::string error) mutable {
+    fetchPlayerHistory({}, std::move(callback));
+}
+void Service::fetchPlayerHistory(std::string uid, HistoryCallback callback) {
+    connect([uid = std::move(uid), callback = std::move(callback)](bool ok, std::string error) mutable {
         if (!ok) { callback({}, std::move(error)); return; }
-        request("GET", "history/" + state().profile.uid, {}, [callback = std::move(callback)](web::WebResponse response) mutable {
+        if (uid.empty()) uid = state().profile.uid;
+        bool const own = uid == state().profile.uid;
+        auto const& current = state().room;
+        if (!own && (!current || !current->guest ||
+            (uid != current->host.uid && uid != current->guest->uid))) {
+            callback({}, "This player is no longer in your room."); return;
+        }
+        auto read = [uid, own, callback = std::move(callback)](bool allowed, std::string error) mutable {
+        if (!allowed) { callback({}, std::move(error)); return; }
+        request("GET", "history/" + uid, {}, [own, callback = std::move(callback)](web::WebResponse response) mutable {
             auto parsed = response.json();
             if (!response.ok() || !parsed) { callback({}, networkError(response)); return; }
             std::vector<MatchRecord> records;
@@ -708,11 +777,23 @@ void Service::fetchHistory(HistoryCallback callback) {
             }
             std::sort(records.begin(), records.end(), [](auto const& a, auto const& b) { return a.playedAt > b.playedAt; });
             if (records.size() > 10) records.resize(10);
-            auto& profile = state().profile; profile.recentGames = static_cast<int>(records.size());
-            auto wins = std::count_if(records.begin(), records.end(), [](auto const& r) { return r.result == "win"; });
-            profile.winRate = records.empty() ? 0. : 100. * wins / records.size();
+            if (own) {
+                auto& profile = state().profile; profile.recentGames = static_cast<int>(records.size());
+                auto wins = std::count_if(records.begin(), records.end(), [](auto const& r) { return r.result == "win"; });
+                profile.winRate = records.empty() ? 0. : 100. * wins / records.size();
+            }
             callback(std::move(records), {});
         }, {}, false, false, true);
+        };
+        if (own) { read(true, {}); return; }
+        // A single bounded grant per viewer. Rules re-check live membership on
+        // every history read, so leaving/replacing a seat revokes access.
+        auto grant = Json::object();
+        grant["roomId"] = current->id; grant["targetUid"] = uid;
+        request("PUT", "historyAccess/" + state().profile.uid, std::move(grant),
+            [read = std::move(read)](web::WebResponse response) mutable {
+                read(response.ok(), response.ok() ? "" : networkError(response));
+            });
     });
 }
 void Service::fetchAttempts(MatchRecord match, int firstRun, AttemptsCallback callback) {
@@ -750,16 +831,13 @@ void Service::acknowledgeResult(Done callback) {
     // service survives scene changes and finishes the return handshake there.
     callback(true, {});
 }
-void Service::createRoom(std::string name, std::string pin, Done callback) {
+void Service::createRoom(std::string, std::string pin, Done callback) {
     if (busy() || state().room) { callback(false, "Leave your current room first."); return; }
-    auto first = name.find_first_not_of(" \t\r\n");
-    auto last = name.find_last_not_of(" \t\r\n");
-    name = first == std::string::npos ? "" : name.substr(first, last - first + 1);
-    if (name.empty() || name.size() > 48) { callback(false, "Use a room name with 1 to 48 characters."); return; }
     if (!pin.empty() && !validPin(pin)) { callback(false, "Use a four-digit password."); return; }
-    connect([name = std::move(name), pin = std::move(pin), callback = std::move(callback)](bool ok, std::string error) mutable {
+    connect([pin = std::move(pin), callback = std::move(callback)](bool ok, std::string error) mutable {
         if (!ok) { callback(false, std::move(error)); return; }
         auto& s = state(); if (s.writing || s.room) { callback(false, "Already joining a room."); return; }
+        auto name = s.profile.name + "'s Room";
         s.writing = true; auto const id = randomId(); auto const epoch = ++s.epoch;
         auto secret = Json::object(); secret["hostUid"] = s.profile.uid; secret["pin"] = pin;
         request("PUT", "roomSecrets/" + id, secret,
@@ -875,6 +953,8 @@ void Service::selectLevel(LevelInfo level, Done callback) {
         if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can select a level.";
         if (boolAt(body, "started")) return "The match has already started.";
         if (boolAt(std::as_const(body)["mapSelection"], "random")) return "Switch to Map Select first.";
+        if (level.platformer && parseRules(std::as_const(body)["rules"]).mode == 1)
+            return "Platformer maps do not support Percent mode. Choose Attempts mode first.";
         auto value = levelJson(level);
         if (std::as_const(body)["level"] != value) { body["hostReady"] = false; body["guestReady"] = false; }
         body["level"] = value; return {};
@@ -894,6 +974,8 @@ void Service::configureMapSelection(MapSelection selection, Done callback) {
         if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid || boolAt(body, "started")) return "Room changed.";
         if (std::as_const(body)["mapDraw"].isObject() && !boolAt(std::as_const(body)["mapDraw"], "settled")) return "Wait for the roulette.";
         if (parseMapSelection(std::as_const(body)["mapSelection"]) == selection) return ROOM_UNCHANGED;
+        if (selection.random && selection.platformer && parseRules(std::as_const(body)["rules"]).mode == 1)
+            return "Platformer maps do not support Percent mode. Choose Attempts mode first.";
         auto config = Json::object(); config["random"] = selection.random;
         config["mask"] = selection.mask; config["platformer"] = selection.platformer;
         body["mapSelection"] = std::move(config);
@@ -941,6 +1023,10 @@ void Service::configureRules(GameRules rules, Done callback) {
         if (boolAt(body, "started")) return "The match has already started.";
         if (std::as_const(body)["mapDraw"].isObject() && !boolAt(std::as_const(body)["mapDraw"], "settled")) return "Wait for the roulette.";
         auto const newRules = rulesJson(rules);
+        auto const selection = parseMapSelection(std::as_const(body)["mapSelection"]);
+        if (rules.mode == 1 && (boolAt(std::as_const(body)["level"], "platformer") ||
+            (selection.random && selection.platformer)))
+            return "Platformer maps do not support Percent mode. Choose Attempts mode first.";
         if (std::as_const(body)["rules"] != newRules) {
             body["rules"] = newRules;
             body["hostReady"] = false;
@@ -983,6 +1069,7 @@ void Service::setReady(bool ready, Done callback) {
         if (ready && ((!needsRandomDraw(current) && intAt(std::as_const(body)["level"], "id") <= 0) ||
             current.mapSelection != expectedSelection || current.level.platformer != expectedLevel.platformer ||
             current.level.creator != expectedLevel.creator ||
+            current.level.featureState != expectedLevel.featureState ||
             intAt(std::as_const(body)["level"], "id") != expectedLevel.id ||
             stringAt(std::as_const(body)["level"], "name") != expectedLevel.name ||
             intAt(std::as_const(body)["level"], "stars") != expectedLevel.stars ||
@@ -1000,8 +1087,11 @@ void Service::setReady(bool ready, Done callback) {
     });
 }
 void Service::sendEmote(std::string kind, Done callback) {
-    if (kind != "like" && kind != "smile" && kind != "angry" && kind != "fire") {
+    if (kind != "like" && kind != "smile" && kind != "angry" && kind != "fire" && kind != "money") {
         callback(false, "Unknown emote."); return;
+    }
+    if (kind == "money" && !isMembershipEdition()) {
+        callback(false, "This emote requires the membership edition."); return;
     }
     if (state().writing || state().authenticating) {
         deferRoomAction([kind = std::move(kind)](Done done) mutable {
@@ -1180,7 +1270,7 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
     if (!state().room || !state().room->battle || !state().room->launch) {
         callback(false, "The battle is no longer active."); return;
     }
-    if (state().writing || state().authenticating || busy()) {
+    if (state().writing || state().polling || state().authenticating || busy()) {
         callback(false, "Room update in progress."); return;
     }
     auto const epoch = state().epoch;
@@ -1191,11 +1281,15 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
             auto const uid = state().profile.uid;
             bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
             if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
-            if (!boolAt(body, "started") || stringAt(std::as_const(body)["launch"], "id") != matchId ||
-                stringAt(std::as_const(body)["battle"], "id") != matchId || intAt(std::as_const(body)["launch"], "releasedAt") <= 0)
-                return "The battle is no longer active.";
+            // The final snapshot must be adopted even when this client's last
+            // progress report races with its opponent's timeout/forfeit.
+            if (battle::adoptBattleReport(boolAt(body, "started"),
+                    stringAt(std::as_const(body)["launch"], "id"),
+                    stringAt(std::as_const(body)["battle"], "id"),
+                    intAt(std::as_const(body)["launch"], "releasedAt"),
+                    intAt(std::as_const(body)["battle"], "finishedAt"), matchId))
+                return ROOM_UNCHANGED;
             auto& battle = body["battle"];
-            if (intAt(battle, "finishedAt") > 0) return "The battle has finished.";
             bool const otherSpectating = boolAt(battle[host ? "guest" : "host"], "spectating");
             auto& own = battle[host ? "host" : "guest"];
             auto const rules = parseRules(std::as_const(body)["rules"]);
@@ -1357,7 +1451,8 @@ void Service::tick(float dt) {
         s.room->battle->hostReturned && s.room->battle->guestReturned) {
         cancelLaunch(s.room->battle->id, [](bool, std::string) {});
     }
-    if (!s.writing && !s.polling && s.room->battle && s.room->battle->finishedAt == 0 &&
+    if (!s.writing && !s.polling && s.pollTime < .5f && s.heartbeatTime < 10.f &&
+        s.room->battle && s.room->battle->finishedAt == 0 &&
         s.room->launch && s.room->launch->releasedAt > 0) {
         auto const& other = isHost() ? s.room->battle->guest : s.room->battle->host;
         if (other.pausedAt > 0 && nowMs() - other.pausedAt >= 30000) {
@@ -1367,6 +1462,7 @@ void Service::tick(float dt) {
     }
     if (s.heartbeatTime >= 10.f) heartbeat();
     else if (s.pollTime >= (s.room->started ? .5f : 2.f)) pollRoom();
+    else reportDownload();
 }
 std::string Service::takeNotice() { return std::exchange(state().notice, {}); }
 }
