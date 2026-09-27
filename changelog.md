@@ -1,3 +1,11 @@
+# v0.5.0
+
+- Add manual/random map modes, exact star/demon-tier filters, and Classic/Platformer filtering for rated maps.
+- Synchronize up to ten roulette cards and their winning result using immutable server snapshots and server time.
+- Download the selected map, music and SFX before the usual Ready/Start flow; reroll for a new random rematch.
+- Keep presence polling alive during native search, bound searches and reuse roulette card nodes.
+- Update Firebase rules for the random selection lifecycle; publish these rules before using random mode.
+
 # v0.4.19
 
 - Lengthen the result percentage and winner decision phases by 30%.

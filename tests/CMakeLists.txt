@@ -22,3 +22,7 @@ add_test(NAME runner COMMAND runner)
 add_executable(battle_progress battle_progress.cpp)
 target_include_directories(battle_progress PRIVATE ../src)
 add_test(NAME battle_progress COMMAND battle_progress)
+
+add_executable(random_map random_map.cpp)
+target_include_directories(random_map PRIVATE ../src)
+add_test(NAME random_map COMMAND random_map)

@@ -9,6 +9,16 @@ Versus provides a room browser and waiting room for one-on-one matches.
   two seats: its host and one guest.
 - The waiting room downloads the selected level and audio automatically. Both
   players ready independently; changing the map or rules clears both states.
+- Map Mode offers the existing native map picker or a rated-only Random Map
+  mode. Choose a star/demon tier and Classic or Platformer. Both players Ready,
+  then the host presses Roll: up to ten matching maps appear in a shared,
+  decelerating roulette with names, difficulty icons, stars and ticking audio.
+  Once chosen, both clients download the map, music and SFX automatically,
+  then Ready again and Start. A finished random match requires a fresh roll.
+- Random candidates are sampled from bounded random pages of GD's native
+  rated search, filtered and deduplicated; this is not a uniform sample over
+  the entire GD catalogue. A sparse filter may return 2–9 cards; fewer than
+  two candidates produces a retry message instead of an invalid draw.
 - The host configures attempts or percentage rules and Practice. The lobby
   shows the active rule before joining.
 - Room emotes provide four rate-limited reactions in animated speech bubbles.
@@ -28,6 +38,11 @@ See [FIREBASE_SETUP.md](FIREBASE_SETUP.md) for Authentication, the server API ke
 and the separate database rules before connecting players.
 
 ## Build and install
+
+Build targets are Windows, Android32 and Android64. iOS/macOS builds (including
+CI) are paused until explicitly requested again. The fixed combined filename
+remains `dist/tipp7.versus-AllPlatform.geode`; it contains only these three
+current targets, never older Apple binaries.
 
 The Geode CLI is configured to use the `First` profile. Run this command from
 the project directory:

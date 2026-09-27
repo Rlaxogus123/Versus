@@ -5,6 +5,7 @@
 #include "MapCache.hpp"
 #include "RoomControls.hpp"
 #include "VersusAudio.hpp"
+#include "RandomMapPolicy.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/CreatorLayer.hpp>
@@ -727,6 +728,8 @@ public:
     }
 };
 
+#include "MapSelectionPopup.inl"
+
 class LobbyLayer : public SceneLayer {
     CCNode* m_listPanel = nullptr;
     CCNode* m_statsPanel = nullptr;
@@ -1080,6 +1083,7 @@ public:
 };
 
 class RoomLayer : public SceneLayer {
+    std::string m_shownDraw;
     CCNode* m_content = nullptr;
     CCNode* m_emotes = nullptr;
     CCLabelBMFont* m_status = nullptr;
@@ -1205,6 +1209,8 @@ class RoomLayer : public SceneLayer {
             room.level.name, room.level.difficulty, room.level.stars, room.level.demon,
             room.level.autoLevel, room.started, m_pending, Service::get().busy(), room.guestReady, launchKey,
             room.hostReady, rulesText(room.rules), m_cached, m_downloading, m_cacheError) +
+            fmt::format(":{}:{}:{}:{}:{}", room.mapSelection.random, room.mapSelection.difficulty,
+                room.mapSelection.platformer, room.mapDraw ? room.mapDraw->id : "", room.mapDraw && room.mapDraw->settled) +
             (room.battle ? fmt::format(":{}:{}:{}", room.battle->finishedAt, room.battle->hostReturned, room.battle->guestReturned) : "");
     }
     void playerCard(CCNode* parent, std::optional<PlayerProfile> const& profile,
@@ -1297,7 +1303,7 @@ class RoomLayer : public SceneLayer {
             face->setPosition({centerX, height - 79.f});
             frame->addChild(face);
         }
-        label(frame, room.level.id ? room.level.name : "Choose a map",
+        label(frame, room.level.id ? room.level.name : room.mapSelection.random ? "Random Map" : "Choose a map",
             {centerX, height - 114.f}, .45f, centerWidth);
         if (room.level.id) {
             auto* star = CCSprite::createWithSpriteFrameName("star_small01_001.png");
@@ -1308,12 +1314,12 @@ class RoomLayer : public SceneLayer {
             }
             label(frame, std::to_string(room.level.stars), {centerX - 3.f, height - 134.f}, .40f, 40.f, ccc3(255, 230, 130));
         } else {
-            label(frame, "A map for your duel", {centerX, height - 135.f}, .39f,
+            label(frame, room.mapSelection.random ? RANDOM_DIFFICULTIES[std::clamp(room.mapSelection.difficulty, 0, 9)] : "A map for your duel", {centerX, height - 135.f}, .39f,
                 centerWidth, kMuted, false, "chatFont.fnt");
         }
         auto* actions = menu(frame);
-        auto const control = readyControl(room.started, m_pending, host, room.level.id > 0,
-            m_cached, m_downloading, myReady);
+        auto const control = readyControl(room.started || drawingMap(room), m_pending, host, room.level.id > 0 || needsRandomDraw(room),
+            m_cached || needsRandomDraw(room), m_downloading, myReady);
         auto* ready = button(actions, this, menu_selector(RoomLayer::onReady),
             control.caption,
             {12.f + cardWidth / 2.f, 24.f}, .55f,
@@ -1337,7 +1343,7 @@ class RoomLayer : public SceneLayer {
             animateReady();
         }
         if (host) {
-            auto* choose = button(actions, this, menu_selector(RoomLayer::onChoose), "Choose Map",
+            auto* choose = button(actions, this, menu_selector(RoomLayer::onChoose), "Map Mode",
                 {centerX - 18.f, 84.f}, .46f, "GJ_button_04.png");
             auto* gearSprite = CCSprite::createWithSpriteFrameName("GJ_optionsBtn_001.png");
             gearSprite->setScale(.5f);
@@ -1345,12 +1351,12 @@ class RoomLayer : public SceneLayer {
             gear->setPosition({centerX + 66.f, 84.f});
             actions->addChild(gear);
             label(frame, "Game Rule", {centerX + 66.f, 64.f}, .40f, 82.f, kIce, false, "chatFont.fnt");
-            enabled(gear, !m_pending && !Service::get().busy() && !room.started);
-            auto* start = button(actions, this, menu_selector(RoomLayer::onStart), room.battle && room.battle->finishedAt ? "Finishing" : room.started ? "Preparing" : "Start",
+            enabled(gear, !m_pending && !Service::get().busy() && !room.started && !drawingMap(room));
+            auto* start = button(actions, this, menu_selector(RoomLayer::onStart), room.battle && room.battle->finishedAt ? "Finishing" : room.started ? "Preparing" : needsRandomDraw(room) ? "Roll" : "Start",
                 {width - cardWidth / 2.f - 12.f, 24.f}, .57f);
-            enabled(choose, !m_pending && !Service::get().busy() && !room.started);
+            enabled(choose, !m_pending && !Service::get().busy() && !room.started && !drawingMap(room));
             enabled(start, !m_pending && !Service::get().busy() && !room.started && room.guest.has_value() &&
-                room.hostReady && room.guestReady && room.level.id > 0 && m_cached);
+                !drawingMap(room) && room.hostReady && room.guestReady && ((room.level.id > 0 && m_cached) || needsRandomDraw(room)));
         } else {
             label(frame, "Host chooses the map and rules", {centerX, 84.f}, .36f, centerWidth, kIce, false, "chatFont.fnt");
             label(frame, "Host starts", {width - cardWidth / 2.f - 12.f, 24.f}, .30f, cardWidth - 12.f, kMuted);
@@ -1359,7 +1365,7 @@ class RoomLayer : public SceneLayer {
             auto* download = button(actions, this, menu_selector(RoomLayer::onDownload),
                 m_downloading ? "Downloading..." : "Download", {centerX, 55.f}, .44f, "GJ_button_04.png");
             enabled(download, !m_downloading && !room.started);
-        } else label(frame, room.level.id > 0 ? "Map and audio ready" : "No map selected",
+        } else label(frame, room.level.id > 0 ? "Map and audio ready" : room.mapSelection.random ? (room.mapSelection.platformer ? "Rated / Platformer" : "Rated / Classic") : "No map selected",
             {centerX, 55.f}, .32f, centerWidth, m_cached ? ccc3(145, 255, 185) : kMuted, false, "chatFont.fnt");
 
         static char const* kinds[] = {"like", "smile", "angry", "fire"};
@@ -1383,6 +1389,7 @@ class RoomLayer : public SceneLayer {
         }
         std::string const status = m_pending ? "Updating room..." : room.battle && room.battle->finishedAt ? "Waiting for both players to return..." : room.started ? "Preparing both players..." :
             m_downloading ? "Downloading the selected map and audio..." : !m_cacheError.empty() ? m_cacheError + " Tap Download to retry." :
+            needsRandomDraw(room) ? (drawingMap(room) ? "Choosing the shared random map..." : "Random map: both players Ready, then host presses Roll") :
             !room.level.id ? "Host: choose a map and game rules" :
             !myReady ? "Press Ready after your map finishes downloading" :
             !opponent ? "Ready - waiting for an opponent" : !opponentReady ? "Ready - waiting for the other player" :
@@ -1422,17 +1429,14 @@ class RoomLayer : public SceneLayer {
     void onChoose(CCObject*) {
         auto const& room = Service::get().room();
         if (m_pending || m_transitioning || Service::get().busy() || !room || !Service::get().isHost() || room->started) return;
-        openLevelSearch([](LevelInfo level) {
-            // The native search replaces this layer. Persist the selection through the service.
-            Service::get().selectLevel(std::move(level), [](bool success, std::string detail) {
-                if (!success) error(detail);
-            });
-        });
+        if (drawingMap(*room)) return;
+        if (auto* popup = MapSelectionPopup::create(*room)) popup->show();
     }
     void onStart(CCObject*) {
         auto const& room = Service::get().room();
         if (m_pending || m_transitioning || Service::get().busy() || !room || !Service::get().isHost() || room->started ||
-            !room->guest || !room->hostReady || !room->guestReady || !room->level.id) return;
+            !room->guest || !room->hostReady || !room->guestReady || drawingMap(*room) ||
+            (!room->level.id && !needsRandomDraw(*room))) return;
         m_pending = true;
         requestRender();
         Service::get().startMatch([self = WeakRef<RoomLayer>(this)](bool success, std::string detail) {
@@ -1449,8 +1453,8 @@ class RoomLayer : public SceneLayer {
             (!Service::get().isHost() && !room->guest)) return;
         m_cached = mapCached(room->level.id);
         bool const host = Service::get().isHost();
-        auto const control = readyControl(room->started, m_pending, host, room->level.id > 0,
-            m_cached, m_downloading, host ? room->hostReady : room->guestReady);
+        auto const control = readyControl(room->started || drawingMap(*room), m_pending, host, room->level.id > 0 || needsRandomDraw(*room),
+            m_cached || needsRandomDraw(*room), m_downloading, host ? room->hostReady : room->guestReady);
         if (control.action == ReadyAction::None) return;
         if (control.action == ReadyAction::ChooseMap) { onChoose(nullptr); return; }
         if (control.action == ReadyAction::Download) {
@@ -1528,6 +1532,10 @@ public:
             }
         }
         if (room) {
+            if (room->mapDraw && room->mapDraw->id != m_shownDraw &&
+                (!room->mapDraw->settled || Service::get().serverNow() < room->mapDraw->at + DRAW_END_MS)) {
+                if (auto* popup = MapRoulettePopup::create(*room)) { m_shownDraw = room->mapDraw->id; popup->show(); }
+            }
             // Native downloads may finish outside our cache callback, or files
             // may be removed. Refresh availability before comparing the UI state.
             bool const cached = room->level.id > 0 && mapCached(room->level.id);

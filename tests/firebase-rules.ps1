@@ -902,6 +902,125 @@ try {
     $fallback.guestReady = $true
     Assert-Status 'guest may ready next round immediately after return' (Put-Room returnfallback guest $fallback)
 
+    # Random-map protocol: pre-draw readiness, immutable shared roulette,
+    # exact filtered result, downloads/readiness, and a fresh draw for rematch.
+    Create-Room randomcase
+    Assert-Status 'random guest joins' (Join-Room randomcase guest)
+    $random = Get-Room randomcase
+    Set-Field $random mapSelection @{ random = $true; difficulty = 0; platformer = $false }
+    Assert-Status 'guest cannot choose random filters' (Put-Room randomcase guest $random) @(401, 403)
+    Assert-Status 'host chooses random filters' (Put-Room randomcase host $random)
+    Ready-Host randomcase
+    $random = Get-Room randomcase; $random.guestReady = $true
+    Assert-Status 'guest ready before random map exists' (Put-Room randomcase guest $random)
+    $random = Get-Room randomcase
+    $random.hostReady = $false; $random.guestReady = $false
+    $candidates = @(
+        @{ id = 1001; name = 'First'; difficulty = 1; stars = 2; demon = $false; autoLevel = $false; platformer = $false },
+        @{ id = 1002; name = 'Second'; difficulty = 1; stars = 2; demon = $false; autoLevel = $false; platformer = $false }
+    )
+    Set-Field $random mapDraw @{ id = [Guid]::NewGuid().ToString('N'); at = (Timestamp); selected = '1'; settled = $false; levels = $candidates }
+    Assert-Status 'guest cannot publish roulette' (Put-Room randomcase guest $random) @(401, 403)
+    $random.mapDraw.levels[0].stars = 0
+    Assert-Status 'unrated roulette candidate rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.levels[0].stars = 3
+    Assert-Status 'wrong star filter rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.levels[0].stars = 2; $random.mapDraw.levels[0].platformer = $true
+    Assert-Status 'wrong map type rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.levels[0].platformer = $false; $random.mapDraw.levels[0].autoLevel = $true
+    Assert-Status 'auto map rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.levels[0].autoLevel = $false; $random.mapDraw.levels[0].id = 1002
+    Assert-Status 'duplicate candidate IDs rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.levels[0].id = 1001; $random.mapDraw.selected = '9'
+    Assert-Status 'missing winner candidate rejected' (Put-Room randomcase host $random) @(401, 403)
+    $random.mapDraw.selected = '1'
+    Assert-Status 'host publishes shared roulette' (Put-Room randomcase host $random)
+    $random = Get-Room randomcase
+    $random.mapDraw.selected = '0'
+    Assert-Status 'host cannot change chosen result mid-spin' (Put-Room randomcase host $random) @(401, 403)
+    $random = Get-Room randomcase
+    $random.mapDraw.levels[0].name = 'Tampered'
+    Assert-Status 'candidate snapshot is immutable' (Put-Room randomcase host $random) @(401, 403)
+    $random = Get-Room randomcase
+    Remove-Field $random mapDraw
+    Assert-Status 'host cannot reroll unchanged filter' (Put-Room randomcase host $random) @(401, 403)
+    $random = Get-Room randomcase
+    $random.mapSelection.difficulty = 1
+    Remove-Field $random mapDraw
+    Assert-Status 'cannot change filters during roulette' (Put-Room randomcase host $random) @(401, 403)
+    $random = Get-Room randomcase
+    $random.hostReady = $true
+    Assert-Status 'cannot ready during roulette' (Put-Room randomcase host $random) @(401, 403)
+    $random = Get-Room randomcase
+    Set-Field $random level $random.mapDraw.levels[1]
+    $random.mapDraw.settled = $true
+    Assert-Status 'cannot settle before spin ends' (Put-Room randomcase host $random) @(401, 403)
+    # Only a local admin fixture advances time; clients cannot alter draw.at.
+    $random = Get-Room randomcase
+    $random.mapDraw.at = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - 10000
+    Assert-Status 'seed elapsed local roulette' (Send-Request PUT 'versus-v1/rooms/randomcase' $random -Admin)
+    $random = Get-Room randomcase
+    Set-Field $random level $random.mapDraw.levels[0]
+    $random.mapDraw.settled = $true
+    Assert-Status 'different winner map rejected' (Put-Room randomcase host $random) @(401, 403)
+    Set-Field $random level $random.mapDraw.levels[1]
+    Assert-Status 'guest cannot settle roulette' (Put-Room randomcase guest $random) @(401, 403)
+    Assert-Status 'host settles exact chosen map' (Put-Room randomcase host $random)
+    $random = Get-Room randomcase
+    Assert-True 'result requires both players to ready after downloading' (!$random.hostReady -and !$random.guestReady -and $random.level.id -eq 1002)
+    Ready-Host randomcase
+    $random = Get-Room randomcase; $random.guestReady = $true
+    Assert-Status 'guest readies downloaded random map' (Put-Room randomcase guest $random)
+    $random = Get-Room randomcase
+    $random.started = $true; Set-Field $random launch (New-Launch)
+    Assert-Status 'random map uses normal synchronized match launch' (Put-Room randomcase host $random)
+    $random = Get-Room randomcase
+    $random.battle.finishedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    Set-Field $random.battle hostReturned $true; Set-Field $random.battle guestReturned $true
+    Assert-Status 'seed completed random match' (Send-Request PUT 'versus-v1/rooms/randomcase' $random -Admin)
+    $random = Get-Room randomcase
+    $random.started = $false; $random.hostReady = $false; $random.guestReady = $false
+    Remove-Field $random launch; Remove-Field $random level; Remove-Field $random mapDraw
+    Assert-Status 'guest can reset completed random match to fresh roulette' (Put-Room randomcase guest $random)
+    $random = Get-Room randomcase
+    Assert-True 'random filters retained but old result cleared' ($random.mapSelection.random -and $null -eq $random.level -and $null -eq $random.mapDraw)
+    $random.mapSelection.random = $false
+    Assert-Status 'host can return to manual mode' (Put-Room randomcase host $random)
+    $random = Get-Room randomcase
+    Set-Field $random level $candidates[0]
+    Assert-Status 'manual selection still works after random mode' (Put-Room randomcase host $random)
+
+    for ($tier = 0; $tier -lt 10; $tier++) {
+        foreach ($platformer in @($false, $true)) {
+            $id = "tier-$tier-$platformer"
+            $random = New-Room host
+            $random.guest = New-Profile guest; $random.guestSeen = Timestamp
+            $random.hostReady = $true; $random.guestReady = $true
+            $random.mapSelection = @{ random = $true; difficulty = $tier; platformer = $platformer }
+            Assert-Status "$id seed readied room" (Send-Request PUT "versus-v1/rooms/$id" $random -Admin)
+            $levels = @()
+            for ($i = 0; $i -lt 10; $i++) {
+                $stars = @(2, (3 + $i % 2), 5, (6 + $i % 2), (8 + $i % 2), 10, 10, 10, 10, 10)[$tier]
+                $difficulty = @(1, $(if ($stars -eq 3) { 2 } else { 3 }), 3, 4, 5, 7, 8, 6, 9, 10)[$tier]
+                $levels += @{ id = 2000 + $i; name = "Map $i"; difficulty = $difficulty; stars = $stars; demon = ($tier -ge 5); autoLevel = $false; platformer = $platformer }
+            }
+            $random = Get-Room $id
+            $random.hostReady = $false; $random.guestReady = $false
+            Set-Field $random mapDraw @{ id = [Guid]::NewGuid().ToString('N'); at = (Timestamp); selected = '9'; settled = $false; levels = $levels }
+            if ($tier -eq 0 -and !$platformer) {
+                $random.mapDraw.levels = $levels + $levels[0]
+                Assert-Status 'eleven roulette cards rejected' (Put-Room $id host $random) @(401, 403)
+                $random.mapDraw.levels = $levels.Clone(); $random.mapDraw.levels[5] = $null
+                Assert-Status 'gaps between cards rejected' (Put-Room $id host $random) @(401, 403)
+                $random.mapDraw.levels = $levels
+            }
+            Assert-Status "$id full ten-card roulette accepted" (Put-Room $id host $random)
+            $random = Get-Room $id
+            Remove-Field $random guest; Remove-Field $random guestSeen; Remove-Field $random mapDraw
+            Assert-Status "$id guest departure cancels roulette" (Put-Room $id guest $random)
+        }
+    }
+
     $history = @{}
     for ($i = 1; $i -le 12; $i++) {
         $history["match$i"] = @{ playedAt = $i; opponentName = 'guest'; levelName = 'Test'; winnerName = 'host'; result = 'win' }

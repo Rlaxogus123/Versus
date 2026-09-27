@@ -111,13 +111,16 @@ void markPicker(CCNode* layer) {
     if (auto* watch = PickerWatch::create()) layer->addChild(watch);
 }
 
-versus::LevelInfo describeLevel(GJGameLevel* level) {
+}
+namespace versus {
+LevelInfo describeLevel(GJGameLevel* level) {
     versus::LevelInfo info;
     info.id = level->m_levelID.value();
     info.name = std::string(level->m_levelName);
     info.stars = level->m_stars.value();
     info.demon = level->m_demon.value() != 0;
     info.autoLevel = level->m_autoLevel;
+    info.platformer = level->isPlatformer();
     if (info.autoLevel) {
         info.difficulty = static_cast<int>(GJDifficulty::Auto);
     }
@@ -226,6 +229,6 @@ class $modify(VersusNativeLevelCell, LevelCell) {
             FLAlertLayer::create("Versus", "Choose an online level.", "OK")->show();
             return;
         }
-        returnToRoom(describeLevel(m_level));
+        returnToRoom(versus::describeLevel(m_level));
     }
 };

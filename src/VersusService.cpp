@@ -2,6 +2,8 @@
 #include "FirebaseConfig.hpp"
 #include "RoomMembership.hpp"
 #include "BattleProgress.hpp"
+#include "RandomMapPolicy.hpp"
+#include "RandomMapSearch.hpp"
 
 #include <Geode/Geode.hpp>
 #include <Geode/binding/GameManager.hpp>
@@ -36,6 +38,7 @@ struct State {
     bool authenticating = false;
     bool writing = false;
     bool maintenanceWriting = false;
+    bool searchingMap = false;
     bool polling = false;
     bool dispatchingAction = false;
     float pollTime = 0;
@@ -60,6 +63,7 @@ struct State {
     std::string returningMatch;
     Clock::time_point returnRequestedAt, nextReturnAttempt;
     Clock::time_point nextAttemptWrite;
+    Clock::time_point nextDrawAttempt;
     std::deque<PendingAttempt> attempts;
     std::unordered_set<std::string> recordedMatches;
     std::vector<Done> connectCallbacks;
@@ -272,18 +276,45 @@ void resolveBattle(Json& body, std::string const& actorUid) {
         battle["finishedAt"] = timestamp();
     }
 }
+LevelInfo parseLevel(Json const& value) {
+    return {intAt(value, "id"), stringAt(value, "name"), static_cast<int>(intAt(value, "difficulty")),
+        static_cast<int>(intAt(value, "stars")), boolAt(value, "demon"), boolAt(value, "autoLevel"), boolAt(value, "platformer")};
+}
+Json levelJson(LevelInfo const& level) {
+    auto value = Json::object(); value["id"] = level.id; value["name"] = level.name;
+    value["difficulty"] = level.autoLevel ? -1 : level.difficulty; value["stars"] = level.stars;
+    value["demon"] = level.demon; value["autoLevel"] = level.autoLevel; value["platformer"] = level.platformer;
+    return value;
+}
+MapSelection parseMapSelection(Json const& value) {
+    return {boolAt(value, "random"), static_cast<int>(intAt(value, "difficulty")), boolAt(value, "platformer")};
+}
 RoomInfo parseRoom(std::string id, Json const& value) {
     RoomInfo result;
     result.id = std::move(id); result.name = stringAt(value, "name");
     result.privateRoom = boolAt(value, "privateRoom");
     result.host = parseProfile(value["host"]);
     if (hasRoomGuest(value)) result.guest = parseProfile(value["guest"]);
-    result.level.id = intAt(value["level"], "id");
-    result.level.name = stringAt(value["level"], "name");
-    result.level.difficulty = static_cast<int>(intAt(value["level"], "difficulty"));
-    result.level.stars = static_cast<int>(intAt(value["level"], "stars"));
-    result.level.demon = boolAt(value["level"], "demon");
-    result.level.autoLevel = boolAt(value["level"], "autoLevel");
+    result.level = parseLevel(value["level"]);
+    result.mapSelection = parseMapSelection(value["mapSelection"]);
+    if (value["mapDraw"].isObject()) {
+        auto const& source = value["mapDraw"];
+        MapDraw draw;
+        draw.id = stringAt(source, "id"); draw.at = intAt(source, "at");
+        auto const selected = stringAt(source, "selected", "0");
+        draw.selected = selected.size() == 1 && selected[0] >= '0' && selected[0] <= '9' ? selected[0] - '0' : -1;
+        draw.settled = boolAt(source, "settled");
+        auto const& levels = source["levels"];
+        // Firebase may represent contiguous numeric keys as an array or object.
+        if (levels.isArray()) for (auto const& level : levels.asArray().unwrap()) draw.levels.push_back(parseLevel(level));
+        else if (levels.isObject()) for (int i = 0; i < 10; ++i) {
+            auto const key = std::to_string(i);
+            if (!levels.contains(key)) break;
+            draw.levels.push_back(parseLevel(levels[key]));
+        }
+        if (draw.levels.size() >= 2 && draw.levels.size() <= 10 && draw.selected >= 0 &&
+            draw.selected < static_cast<int>(draw.levels.size()) && !draw.id.empty()) result.mapDraw = std::move(draw);
+    }
     result.rules = parseRules(value["rules"]);
     result.hostReady = boolAt(value, "hostReady");
     result.guestReady = boolAt(value, "guestReady");
@@ -404,6 +435,7 @@ void request(std::string method, std::string path, Json body, Response callback,
 void disconnected(std::string notice) {
     auto& s = state();
     ++s.epoch; s.room.reset(); s.polling = false; s.writing = false; s.maintenanceWriting = false;
+    s.searchingMap = false;
     s.notice = std::move(notice);
 }
 void adoptRoom(std::string const& id, Json const& value) {
@@ -527,6 +559,8 @@ void heartbeat() {
                 body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
                 body["hostReady"] = false; body["guestReady"] = false;
                 body["launch"] = nullptr; body["battle"] = nullptr;
+                body.erase("mapDraw");
+                if (boolAt(std::as_const(body)["mapSelection"], "random")) body.erase("level");
             }
         } else if (stringAt(std::as_const(body)["guest"], "uid") == uid) {
             if (nowMs() - intAt(body, "hostSeen") > firebase_config::PRESENCE_TIMEOUT_MS)
@@ -622,7 +656,7 @@ PlayerProfile const& Service::profile() const { return state().profile; }
 std::optional<RoomInfo> const& Service::room() const { return state().room; }
 bool Service::isHost() const { return state().room && state().room->host.uid == state().profile.uid; }
 bool Service::busy() const {
-    return (state().writing && !state().maintenanceWriting) ||
+    return state().searchingMap || (state().writing && !state().maintenanceWriting) ||
         (!state().pendingActions.empty() && !state().dispatchingAction) || state().authenticating;
 }
 int64_t Service::serverNow() const { return nowMs(); }
@@ -800,6 +834,8 @@ void Service::leaveRoom(Done callback) {
             body["guest"] = nullptr; body["guestSeen"] = nullptr; body["started"] = false;
             body["hostReady"] = false; body["guestReady"] = false;
             body["launch"] = nullptr; body["battle"] = nullptr;
+            body.erase("mapDraw");
+            if (boolAt(std::as_const(body)["mapSelection"], "random")) body.erase("level");
         }
         else return "Your room connection expired.";
         return {};
@@ -828,14 +864,53 @@ void Service::selectLevel(LevelInfo level, Done callback) {
     mutateRoom(state().room->id, epoch, [level = std::move(level)](Json& body) -> std::string {
         if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can select a level.";
         if (boolAt(body, "started")) return "The match has already started.";
-        auto value = Json::object(); value["id"] = level.id; value["name"] = level.name;
-        value["difficulty"] = level.autoLevel ? -1 : level.difficulty; value["stars"] = level.stars;
-        value["demon"] = level.demon; value["autoLevel"] = level.autoLevel;
+        if (boolAt(std::as_const(body)["mapSelection"], "random")) return "Switch to Map Select first.";
+        auto value = levelJson(level);
         if (std::as_const(body)["level"] != value) { body["hostReady"] = false; body["guestReady"] = false; }
         body["level"] = value; return {};
     }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
         if (epoch == state().epoch) state().writing = false;
         callback(ok, std::move(error));
+    });
+}
+void Service::configureMapSelection(MapSelection selection, Done callback) {
+    if (state().maintenanceWriting) {
+        deferRoomAction([selection](Done done) { Service::get().configureMapSelection(selection, std::move(done)); }, std::move(callback));
+        return;
+    }
+    if (busy() || !isHost() || !validSelection(selection)) { callback(false, "Only the host can change map selection."); return; }
+    auto const epoch = state().epoch; state().writing = true;
+    mutateRoom(state().room->id, epoch, [selection](Json& body) -> std::string {
+        if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid || boolAt(body, "started")) return "Room changed.";
+        if (std::as_const(body)["mapDraw"].isObject() && !boolAt(std::as_const(body)["mapDraw"], "settled")) return "Wait for the roulette.";
+        if (parseMapSelection(std::as_const(body)["mapSelection"]) == selection) return ROOM_UNCHANGED;
+        auto config = Json::object(); config["random"] = selection.random;
+        config["difficulty"] = selection.difficulty; config["platformer"] = selection.platformer;
+        body["mapSelection"] = std::move(config);
+        body.erase("mapDraw"); body.erase("level");
+        body["hostReady"] = false; body["guestReady"] = false;
+        return {};
+    }, [epoch, callback = std::move(callback)](bool ok, std::string detail) mutable {
+        if (epoch == state().epoch) state().writing = false;
+        callback(ok, std::move(detail));
+    });
+}
+void Service::finishMapDraw(std::string id, Done callback) {
+    if (state().writing || busy() || !isHost()) { callback(false, "Room is busy."); return; }
+    auto const epoch = state().epoch; state().writing = true;
+    mutateRoom(state().room->id, epoch, [id](Json& body) -> std::string {
+        auto room = parseRoom("", body);
+        if (!room.mapDraw || room.mapDraw->id != id || boolAt(body, "started")) return "Roulette changed.";
+        if (room.mapDraw->settled) return ROOM_UNCHANGED;
+        if (nowMs() < room.mapDraw->at + DRAW_END_MS) return "Roulette is still spinning.";
+        auto const& level = room.mapDraw->levels[room.mapDraw->selected];
+        if (!room.guest || !matchesRandomMap(level, room.mapSelection)) return "Room/filter changed.";
+        body["level"] = levelJson(level); body["mapDraw"]["settled"] = true;
+        body["hostReady"] = false; body["guestReady"] = false;
+        return {};
+    }, [epoch, callback = std::move(callback)](bool ok, std::string detail) mutable {
+        if (epoch == state().epoch) state().writing = false;
+        callback(ok, std::move(detail));
     });
 }
 void Service::configureRules(GameRules rules, Done callback) {
@@ -854,6 +929,7 @@ void Service::configureRules(GameRules rules, Done callback) {
     mutateRoom(state().room->id, epoch, [rules](Json& body) -> std::string {
         if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can change game rules.";
         if (boolAt(body, "started")) return "The match has already started.";
+        if (std::as_const(body)["mapDraw"].isObject() && !boolAt(std::as_const(body)["mapDraw"], "settled")) return "Wait for the roulette.";
         auto const newRules = rulesJson(rules);
         if (std::as_const(body)["rules"] != newRules) {
             body["rules"] = newRules;
@@ -871,9 +947,10 @@ void Service::setReady(bool ready, Done callback) {
     if (state().writing || state().authenticating) {
         auto const expectedLevel = state().room ? state().room->level : LevelInfo{};
         auto const expectedRules = state().room ? state().room->rules : GameRules{};
-        deferRoomAction([ready, expectedLevel, expectedRules](Done done) {
+        auto const expectedSelection = state().room ? state().room->mapSelection : MapSelection{};
+        deferRoomAction([ready, expectedLevel, expectedRules, expectedSelection](Done done) {
             auto const& current = state().room;
-            if (ready && (!current || current->level != expectedLevel || current->rules != expectedRules)) {
+            if (ready && (!current || current->level != expectedLevel || current->rules != expectedRules || current->mapSelection != expectedSelection)) {
                 done(false, "The map or rules changed. Check them and ready again."); return;
             }
             Service::get().setReady(ready, std::move(done));
@@ -884,13 +961,17 @@ void Service::setReady(bool ready, Done callback) {
     auto const epoch = state().epoch;
     auto const expectedLevel = state().room->level;
     auto const expectedRules = state().room->rules;
+    auto const expectedSelection = state().room->mapSelection;
     state().writing = true;
-    mutateRoom(state().room->id, epoch, [ready, expectedLevel, expectedRules](Json& body) -> std::string {
+    mutateRoom(state().room->id, epoch, [ready, expectedLevel, expectedRules, expectedSelection](Json& body) -> std::string {
         auto const uid = state().profile.uid;
         bool const host = stringAt(std::as_const(body)["host"], "uid") == uid;
         if (!host && stringAt(std::as_const(body)["guest"], "uid") != uid) return "Your room connection expired.";
         if (boolAt(body, "started")) return "The match has already started.";
-        if (ready && (intAt(std::as_const(body)["level"], "id") <= 0 ||
+        auto const current = parseRoom("", body);
+        if (drawingMap(current)) return "Wait for the roulette.";
+        if (ready && ((!needsRandomDraw(current) && intAt(std::as_const(body)["level"], "id") <= 0) ||
+            current.mapSelection != expectedSelection || current.level.platformer != expectedLevel.platformer ||
             intAt(std::as_const(body)["level"], "id") != expectedLevel.id ||
             stringAt(std::as_const(body)["level"], "name") != expectedLevel.name ||
             intAt(std::as_const(body)["level"], "stars") != expectedLevel.stars ||
@@ -946,6 +1027,47 @@ void Service::startMatch(Done callback) {
         return;
     }
     if (!isHost() || busy()) { callback(false, "Only the host can start the match."); return; }
+    if (needsRandomDraw(*state().room)) {
+        auto const expected = *state().room;
+        if (drawingMap(expected) || !expected.guest || !expected.hostReady || !expected.guestReady) {
+            callback(false, "Both players must be ready for the roulette."); return;
+        }
+        // Native search can take several requests. Keep Firebase polling and
+        // heartbeats alive so neither peer expires during the search.
+        auto const epoch = state().epoch; state().searchingMap = true;
+        findRandomMaps(expected.mapSelection, [epoch, expected, callback = std::move(callback)]
+            (std::vector<LevelInfo> levels, std::string error) mutable {
+            if (epoch != state().epoch) { callback(false, "Room changed."); return; }
+            state().searchingMap = false;
+            if (!error.empty() || levels.size() < 2) {
+                callback(false, error.empty() ? "No rated maps found." : std::move(error)); return;
+            }
+            std::mt19937 random {std::random_device{}()};
+            auto const selected = std::uniform_int_distribution<int>(0, static_cast<int>(levels.size()) - 1)(random);
+            auto draw = Json::object(); draw["id"] = randomId(); draw["at"] = timestamp();
+            draw["selected"] = std::to_string(selected); draw["settled"] = false; draw["levels"] = Json::array();
+            for (auto const& level : levels) draw["levels"].push(levelJson(level));
+            // Serialize publication with any heartbeat already in flight.
+            deferRoomAction([expected, draw, epoch](Done done) {
+                state().writing = true;
+                mutateRoom(expected.id, epoch, [expected, draw](Json& body) -> std::string {
+                    auto current = parseRoom(expected.id, body);
+                    if (current.started || current.host.uid != state().profile.uid || !current.guest ||
+                        current.guest->uid != expected.guest->uid || current.mapSelection != expected.mapSelection ||
+                        current.rules != expected.rules || current.mapDraw ||
+                        nowMs() - intAt(body, "guestSeen") > firebase_config::PRESENCE_TIMEOUT_MS ||
+                        !current.hostReady || !current.guestReady) return "Room, readiness or filters changed. Try again.";
+                    body["mapDraw"] = draw; body.erase("level");
+                    body["hostReady"] = false; body["guestReady"] = false; body["hostSeen"] = timestamp();
+                    return {};
+                }, [epoch, done = std::move(done)](bool ok, std::string detail) mutable {
+                    if (epoch == state().epoch) { state().writing = false; state().pollTime = 2.f; }
+                    done(ok, std::move(detail));
+                });
+            }, std::move(callback));
+        });
+        return;
+    }
     auto const epoch = state().epoch; state().writing = true;
     mutateRoom(state().room->id, epoch, [launchId = randomId(), firstHost = (std::random_device{}() & 1) == 0](Json& body) -> std::string {
         if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid) return "Only the host can start the match.";
@@ -953,6 +1075,8 @@ void Service::startMatch(Done callback) {
         if (!std::as_const(body)["guest"].isObject() || nowMs() - intAt(body, "guestSeen") > firebase_config::PRESENCE_TIMEOUT_MS) return "Wait for another player.";
         if (!boolAt(body, "hostReady") || !boolAt(body, "guestReady")) return "Both players must be ready.";
         if (intAt(std::as_const(body)["level"], "id") <= 0) return "Choose a level first.";
+        auto const room = parseRoom("", body);
+        if (needsRandomDraw(room)) return "Complete the roulette first.";
         auto const rules = parseRules(std::as_const(body)["rules"]);
         if ((rules.mode != 0 && rules.mode != 1) || rules.attempts < 1 || rules.attempts > 99 ||
             rules.targetPercent < 1 || rules.targetPercent > 100 ||
@@ -1027,9 +1151,13 @@ void Service::cancelLaunch(std::string launchId, Done callback) {
             return ROOM_UNCHANGED;
         if (stringAt(std::as_const(body)["launch"], "id") != launchId ||
             stringAt(std::as_const(body)["battle"], "id") != launchId) return "Match session changed.";
+        bool const finished = intAt(std::as_const(body)["battle"], "finishedAt") > 0;
         body["started"] = false;
         body["hostReady"] = false; body["guestReady"] = false;
         body["launch"] = nullptr; body["battle"] = nullptr;
+        if (finished && boolAt(std::as_const(body)["mapSelection"], "random")) {
+            body.erase("mapDraw"); body.erase("level");
+        }
         return {};
     }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
         if (epoch == state().epoch) { state().writing = false; state().pollTime = 2.f; }
@@ -1134,6 +1262,14 @@ void Service::tick(float dt) {
     }
     if (!connected()) {
         if (!s.authenticating && s.pollTime >= 2.f) { s.pollTime = 0; connect([](bool, std::string) {}); }
+        return;
+    }
+    if (isHost() && drawingMap(*s.room) && !s.writing && !busy() && !s.polling &&
+        nowMs() >= s.room->mapDraw->at + DRAW_END_MS && Clock::now() >= s.nextDrawAttempt) {
+        s.nextDrawAttempt = Clock::now() + std::chrono::seconds(2);
+        finishMapDraw(s.room->mapDraw->id, [](bool ok, std::string detail) {
+            if (!ok) log::warn("Versus roulette finalization: {}", detail);
+        });
         return;
     }
     if (s.room->guest && s.room->battle && s.room->battle->finishedAt > 0 &&

@@ -1,4 +1,4 @@
-name: Build Geode Mod
+name: Build Geode Mod (Windows and Android)
 
 on:
   workflow_dispatch:
@@ -17,13 +17,6 @@ jobs:
         config:
           - name: Windows
             os: windows-latest
-
-          - name: macOS
-            os: macos-latest
-
-          - name: iOS
-            os: macos-latest
-            target: iOS
 
           - name: Android32
             os: ubuntu-latest
@@ -54,6 +47,25 @@ jobs:
       - uses: geode-sdk/build-geode-mod/combine@main
         id: build
 
+      - name: Validate Windows and Android package
+        env:
+          BUILD_OUTPUT: ${{ steps.build.outputs.build-output }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          packages = list(Path(os.environ['BUILD_OUTPUT']).glob('*.geode'))
+          assert len(packages) == 1, 'Expected one combined package'
+          expected = {'tipp7.versus.dll', 'tipp7.versus.android32.so', 'tipp7.versus.android64.so'}
+          with ZipFile(packages[0]) as archive:
+              assert archive.testzip() is None, 'Damaged archive'
+              binaries = {name for name in archive.namelist() if name.endswith(('.dll', '.so', '.dylib'))}
+              assert binaries == expected, f'Unexpected platforms: {binaries}'
+              assert json.loads(archive.read('mod.json'))['id'] == 'tipp7.versus'
+          print('Verified Windows / Android32 / Android64, without Apple binaries')
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: Build Output
@@ -74,5 +86,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view all-platform-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create all-platform-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Latest All-Platform Build" --notes "Automatically updated from main."
+            gh release create all-platform-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Latest Windows and Android Build" --notes "Windows, Android32 and Android64. iOS/macOS builds are paused. Automatically updated from main."
           gh release upload all-platform-latest "$RUNNER_TEMP/tipp7.versus-AllPlatform.geode" --repo "$GITHUB_REPOSITORY" --clobber

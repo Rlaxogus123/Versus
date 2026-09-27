@@ -24,7 +24,21 @@ struct LevelInfo {
     int stars = 0;
     bool demon = false;
     bool autoLevel = false;
+    bool platformer = false;
     bool operator==(LevelInfo const&) const = default;
+};
+struct MapSelection {
+    bool random = false;
+    int difficulty = 0; // 2*, 3-4*, 5*, 6-7*, 8-9*, then five demon tiers
+    bool platformer = false;
+    bool operator==(MapSelection const&) const = default;
+};
+struct MapDraw {
+    std::string id;
+    int64_t at = 0;
+    int selected = 0;
+    bool settled = false;
+    std::vector<LevelInfo> levels;
 };
 struct LaunchInfo {
     std::string id;
@@ -94,6 +108,8 @@ struct RoomInfo {
     PlayerProfile host;
     std::optional<PlayerProfile> guest;
     LevelInfo level;
+    MapSelection mapSelection;
+    std::optional<MapDraw> mapDraw;
     GameRules rules;
     bool hostReady = false;
     bool guestReady = false;
@@ -128,6 +144,8 @@ public:
     void joinRoom(RoomInfo room, std::string pin, Done callback);
     void leaveRoom(Done callback);
     void selectLevel(LevelInfo level, Done callback);
+    void configureMapSelection(MapSelection selection, Done callback);
+    void finishMapDraw(std::string id, Done callback);
     void configureRules(GameRules rules, Done callback);
     void setReady(bool ready, Done callback);
     void sendEmote(std::string kind, Done callback);
