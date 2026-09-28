@@ -41,7 +41,8 @@ class Packaging(unittest.TestCase):
                 self.fixture(platform, edition)
 
     def fixture(self, platform, edition, *, actual_edition=None, sound=b'sound',
-                version='v0.5.3', apple=False, corrupt_arch=False, notes=b'Notes\nText\n'):
+                version='v0.5.3', apple=False, corrupt_arch=False, notes=b'Notes\nText\n',
+                windows_manifest=False):
         folder = self.artifacts / f'geode-{platform}-{edition}'
         folder.mkdir(parents=True, exist_ok=True)
         name = packager.BINARIES[platform]
@@ -50,8 +51,10 @@ class Packaging(unittest.TestCase):
             data[4] = 0
             data[68] = 0
         with ZipFile(folder / 'mod.geode', 'w') as archive:
-            archive.writestr('mod.json', json.dumps({
-                'id': 'tipp7.versus', 'version': version, 'name': 'Versus'}))
+            manifest = json.dumps({'id': 'tipp7.versus', 'version': version, 'name': 'Versus'}, indent=2)
+            if windows_manifest:
+                manifest = manifest.replace('\n', '\r\n')
+            archive.writestr('mod.json', manifest)
             archive.writestr(name, data)
             archive.writestr('changelog.md', notes)
             if sound is not None:
@@ -81,6 +84,10 @@ class Packaging(unittest.TestCase):
         self.combine()
         with ZipFile(self.root / 'output' / 'tipp7.versus-AllPlatform-standard.geode') as archive:
             self.assertEqual(archive.read('changelog.md'), b'Notes\nText\n')
+
+    def test_manifest_line_endings(self):
+        self.fixture('Windows', 'standard', windows_manifest=True)
+        self.combine()
 
     def test_rejects_wrong_architecture(self):
         self.fixture('Windows', 'standard', corrupt_arch=True)

@@ -57,6 +57,8 @@ def combine(root, destination, version):
                         continue
                     assert not name.startswith('/') and '..' not in Path(name).parts
                     value = archive.read(name)
+                    if name == 'mod.json':
+                        value = json.dumps(json.loads(value), sort_keys=True, indent=2).encode()
                     # Checkout uses CRLF on Windows and LF on Linux. Only
                     # normalize bundled documentation; never alter binaries
                     # or audio when comparing platform resources.
