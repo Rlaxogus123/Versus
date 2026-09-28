@@ -1,3 +1,11 @@
+# v0.5.4
+
+- Prevent slow room polls from starving progress reports; retry busy reports without an extra half-second delay.
+- Fill download bars from the left and tighten normal-star selector spacing.
+- Let hosts remove challengers in the waiting room; show removal/host-exit notices after the lobby transition.
+- Add bounded native GD aura particles to membership player icons, including remote profiles.
+- Republish Firebase rules for host removal and the optional cosmetic membership flag.
+
 # v0.5.3
 
 - Show local and opponent map/music/SFX preparation percentages, progress bars and completed-file counts.

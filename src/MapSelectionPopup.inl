@@ -73,7 +73,7 @@ class MapSelectionPopup final : public Popup {
             int count = std::popcount(static_cast<unsigned>(bits)), column = 0;
             for (int bitIndex = 0; bitIndex < 13; ++bitIndex) if (bits & (1 << bitIndex)) {
                 float const start = x - (count - 1) * 22.f + column++ * 44.f;
-                float const starY = i < 5 ? 148.f : 64.f;
+                float const starY = i < 5 ? 155.f : 64.f;
                 // One hit target includes the checkbox, number and native star.
                 auto* optionSprite = CCSprite::create(); optionSprite->setContentSize({42.f, 24.f});
                 auto* box = CCSprite::createWithSpriteFrameName("GJ_checkOff_001.png"); box->setScale(.43f);

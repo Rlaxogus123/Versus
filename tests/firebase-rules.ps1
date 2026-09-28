@@ -1033,6 +1033,7 @@ try {
     Assert-True 'history contains only latest ten of twelve' (@($recent.Data.PSObject.Properties).Count -eq 10 -and $null -eq $recent.Data.match1 -and $null -eq $recent.Data.match2 -and $null -ne $recent.Data.match12)
     Assert-Status 'other user cannot read private history' (Send-Request GET 'versus-v1/history/host' -Uid guest -Query 'orderBy=%22playedAt%22&limitToLast=10') @(401, 403)
     . (Join-Path $PSScriptRoot 'firebase-preparation.ps1')
+    . (Join-Path $PSScriptRoot 'firebase-kick.ps1')
     Assert-Status 'unbounded history denied' (Send-Request GET 'versus-v1/history/host' -Uid host) @(401, 403)
     Assert-Status 'client cannot invent match results' (Send-Request PUT 'versus-v1/history/host' $history -Uid host) @(401, 403)
     Assert-Status 'client cannot delete history' (Send-Request DELETE 'versus-v1/history/host' -Uid host) @(401, 403)

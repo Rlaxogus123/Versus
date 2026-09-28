@@ -124,6 +124,7 @@ void refreshLocalProfile() {
     profile.name = account && !account->m_username.empty() ? std::string(account->m_username) : "Player";
     profile.accountId = account ? account->m_accountID : 0;
     profile.icon = manager ? std::max(1, manager->getPlayerFrame()) : 1;
+    profile.membership = isMembershipEdition();
     profile.color1 = manager ? pack(manager->colorForIdx(manager->getPlayerColor())) : 0x007BFF;
     profile.color2 = manager ? pack(manager->colorForIdx(manager->getPlayerColor2())) : 0xFFFFFF;
 }
@@ -137,6 +138,7 @@ Json profileJson(PlayerProfile const& profile) {
     value["accountId"] = profile.accountId; value["icon"] = profile.icon;
     value["color1"] = profile.color1; value["color2"] = profile.color2;
     value["winRate"] = profile.winRate; value["recentGames"] = profile.recentGames;
+    if (profile.membership) value["membership"] = true;
     return value;
 }
 PlayerProfile parseProfile(Json const& value) {
@@ -148,6 +150,7 @@ PlayerProfile parseProfile(Json const& value) {
     result.color2 = static_cast<int>(intAt(value, "color2", 0xFFFFFF));
     result.winRate = value["winRate"].asDouble().unwrapOr(0.);
     result.recentGames = static_cast<int>(intAt(value, "recentGames"));
+    result.membership = boolAt(value, "membership");
     return result;
 }
 GameRules parseRules(Json const& value) {
@@ -552,6 +555,8 @@ void pollRoom() {
         auto& s = state();
         if (epoch != s.epoch) return;
         s.polling = false;
+        // Give pending progress writes a dispatch window after slow reads.
+        s.pollTime = 0.f;
         if (s.writing || revision != s.revision) return;
         auto parsed = response.json();
         // A network/permission error is NOT evidence that the host deleted a room.
@@ -564,7 +569,8 @@ void pollRoom() {
                 disconnected("The host disconnected."); return;
             }
             if (stringAt(std::as_const(body)["guest"], "uid") != s.profile.uid) {
-                disconnected("Your room connection expired."); return;
+                disconnected(stringAt(body, "lastKickUid") == s.profile.uid ?
+                    "You were removed from the room by the host." : "Your room connection expired."); return;
             }
         }
         adoptRoom(id, body);
@@ -724,6 +730,7 @@ bool Service::busy() const {
         (!state().pendingActions.empty() && !state().dispatchingAction) || state().authenticating;
 }
 int64_t Service::serverNow() const { return nowMs(); }
+bool Service::battleReportAvailable() const { return !state().writing && !state().polling && !busy(); }
 void Service::fetchRooms(RoomListCallback callback) {
     connect([callback = std::move(callback)](bool ok, std::string error) mutable {
         if (!ok) { callback({}, std::move(error)); return; }
@@ -938,6 +945,27 @@ void Service::leaveRoom(Done callback) {
             });
         }
         callback(true, {});
+    });
+}
+void Service::kickGuest(std::string uid, Done callback) {
+    if (!isHost() || busy() || !state().room->guest || state().room->started) {
+        callback(false, "Only the host can remove a challenger in the waiting room."); return;
+    }
+    auto const epoch = state().epoch; state().writing = true;
+    mutateRoom(state().room->id, epoch, [uid](Json& body) -> std::string {
+        if (stringAt(std::as_const(body)["host"], "uid") != state().profile.uid || boolAt(body, "started"))
+            return "The room has changed. Try again in the waiting room.";
+        if (stringAt(std::as_const(body)["guest"], "uid") != uid) return "The challenger has changed.";
+        body["lastKickUid"] = uid;
+        body.erase("guest"); body.erase("guestSeen");
+        body["hostReady"] = false; body["guestReady"] = false;
+        body.erase("mapDraw");
+        if (boolAt(std::as_const(body)["mapSelection"], "random")) body.erase("level");
+        resetRoomScore(body);
+        return {};
+    }, [epoch, callback = std::move(callback)](bool ok, std::string detail) mutable {
+        if (epoch == state().epoch) state().writing = false;
+        callback(ok, std::move(detail));
     });
 }
 void Service::selectLevel(LevelInfo level, Done callback) {
@@ -1331,7 +1359,9 @@ void Service::reportBattle(BattlePlayerState progress, bool sendPosition, Done c
         }, [epoch, callback = std::move(callback)](bool ok, std::string error) mutable {
             if (epoch == state().epoch) {
                 state().writing = false;
-                state().pollTime = 2.f;
+                // The CAS response is already a fresh room snapshot.
+                state().pollTime = 0.f;
+                if (ok) state().heartbeatTime = 0.f;
             }
             callback(ok, std::move(error));
         });
@@ -1461,7 +1491,7 @@ void Service::tick(float dt) {
         }
     }
     if (s.heartbeatTime >= 10.f) heartbeat();
-    else if (s.pollTime >= (s.room->started ? .5f : 2.f)) pollRoom();
+    else if (s.pollTime >= (s.room->started ? .25f : 2.f)) pollRoom();
     else reportDownload();
 }
 std::string Service::takeNotice() { return std::exchange(state().notice, {}); }

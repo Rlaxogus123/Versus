@@ -72,6 +72,7 @@ struct Card {
         auto* icon = SimplePlayer::create(std::clamp(player.icon, 1, count));
         icon->setColors(rgb(player.color1), rgb(player.color2));
         icon->setGlowOutline(ccWHITE);
+        addMembershipAura(icon, player.membership);
         icon->setScale(.82f);
         icon->setFlipX(mirrored);
         icon->setPosition({iconX, 27.f});

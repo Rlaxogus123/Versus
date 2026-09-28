@@ -16,6 +16,7 @@ struct PlayerProfile {
     int color2 = 0xFFFFFF;
     double winRate = 0;
     int recentGames = 0;
+    bool membership = false; // Cosmetic edition flag, not authorization.
 };
 struct LevelInfo {
     int64_t id = 0;
@@ -147,6 +148,7 @@ public:
     std::optional<RoomInfo> const& room() const;
     bool isHost() const;
     bool busy() const;
+    bool battleReportAvailable() const;
     void fetchRooms(RoomListCallback callback);
     void fetchHistory(HistoryCallback callback);
     void fetchPlayerHistory(std::string uid, HistoryCallback callback);
@@ -156,6 +158,7 @@ public:
     void createRoom(std::string name, std::string pin, Done callback);
     void joinRoom(RoomInfo room, std::string pin, Done callback);
     void leaveRoom(Done callback);
+    void kickGuest(std::string uid, Done callback);
     void selectLevel(LevelInfo level, Done callback);
     void configureMapSelection(MapSelection selection, Done callback);
     void finishMapDraw(std::string id, Done callback);

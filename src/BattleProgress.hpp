@@ -4,6 +4,9 @@
 #include <string_view>
 
 namespace versus::battle {
+inline bool progressReportDue(float remaining, bool reporting, bool dirty, bool paused, bool transportReady) {
+    return remaining <= 0.f && !reporting && (dirty || paused) && transportReady;
+}
 // A progress request also reads the authoritative room. A final/canceled/new
 // match is a successful read, not a failed write to retry against stale state.
 inline bool adoptBattleReport(bool started, std::string_view launchID,

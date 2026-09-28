@@ -112,6 +112,7 @@ bool SpectatorRunner::init(PlayerProfile const& profile, GameRules const& rules)
     strip("groundSquare_01_001.png",20.f,ccc3(75,190,245),1.f);
     m->avatar=SimplePlayer::create(std::clamp(profile.icon,1,std::max(1,GameManager::sharedState()->countForType(IconType::Cube))));
     m->avatar->setColors(ccc3((profile.color1>>16)&255,(profile.color1>>8)&255,profile.color1&255),ccc3((profile.color2>>16)&255,(profile.color2>>8)&255,profile.color2&255));
+    addMembershipAura(m->avatar, profile.membership);
     m->avatar->setScale(.9f);clip->addChild(m->avatar,3);
     m->percent=CCLabelBMFont::create("0%","bigFont.fnt");m->percent->setScale(.38f);clip->addChild(m->percent,4);
     setTouchEnabled(true);setKeyboardEnabled(true);scheduleUpdate();update(0.f);

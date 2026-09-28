@@ -183,6 +183,7 @@ SimplePlayer* player(CCNode* parent, PlayerProfile const& profile, CCPoint point
     auto* icon = SimplePlayer::create(std::clamp(profile.icon, 1, count));
     icon->setColors(unpackColor(profile.color1), unpackColor(profile.color2));
     icon->disableGlowOutline();
+    addMembershipAura(icon, profile.membership);
     icon->setPosition(point);
     icon->setScale(scale);
     parent->addChild(icon);
@@ -1189,10 +1190,6 @@ public:
         geode::queueInMainThread([self = WeakRef<LobbyLayer>(this)] {
             auto owner = self.lock();
             if (!owner || !owner->isRunning() || owner->m_transitioning) return;
-            if (!owner->m_notice.empty()) {
-                auto message = std::exchange(owner->m_notice, {});
-                FLAlertLayer::create("Room Closed", message.c_str(), "OK")->show();
-            }
             if (Service::get().connected()) {
                 enabled(owner->m_create, true);
                 enabled(owner->m_history, true);
@@ -1200,6 +1197,13 @@ public:
                 owner->fetch();
             } else owner->connect();
         });
+    }
+    void onEnterTransitionDidFinish() override {
+        SceneLayer::onEnterTransitionDidFinish();
+        if (!m_notice.empty()) {
+            auto message = std::exchange(m_notice, {});
+            FLAlertLayer::create("Versus", message.c_str(), "OK")->show();
+        }
     }
     void update(float dt) override {
         if (m_transitioning || m_mutating) return;
@@ -1414,8 +1418,15 @@ class RoomLayer : public SceneLayer {
             auto* track = CCLayerColor::create(ccc4(15,34,65,255), progress.width, 4.f);
             track->setPosition({6.f,18.f}); card->addChild(track);
             progress.fill = CCLayerColor::create(ccc4(155,225,255,255), progress.width, 4.f);
+            progress.fill->setAnchorPoint({0.f, 0.f});
+            progress.fill->ignoreAnchorPointForPosition(false);
             progress.fill->setPosition({6.f,18.f}); progress.fill->setScaleX(0.f); card->addChild(progress.fill);
             progress.detail = label(card, "", {size.width / 2.f, 8.f}, .37f, progress.width, kIce, false, "chatFont.fnt");
+            if (!host && Service::get().isHost() && Service::get().room() && !Service::get().room()->started) {
+                auto* kick = button(menu(card), this, menu_selector(RoomLayer::onKick), "Kick",
+                    {size.width - 23.f, size.height - 43.f}, .3f);
+                enabled(kick, !m_pending && !Service::get().busy());
+            }
         } else {
             // Empty seats use a vector silhouette instead of a missing sprite frame.
             auto* placeholder = CCDrawNode::create();
@@ -1605,6 +1616,23 @@ class RoomLayer : public SceneLayer {
         if (!room || m_transitioning) return;
         auto const* profile = sender->getTag() == 0 ? &room->host : (room->guest ? &*room->guest : nullptr);
         if (profile) if (auto* popup = PlayerPopup::create(*profile)) popup->show();
+    }
+    void onKick(CCObject*) {
+        auto const& room = Service::get().room();
+        if (m_pending || m_transitioning || !room || room->started || !room->guest || !Service::get().isHost()) return;
+        auto const uid = room->guest->uid;
+        createQuickPopup("Remove challenger", "Remove this challenger from the room?", "Cancel", "Kick",
+            [self = WeakRef<RoomLayer>(this), uid](auto*, bool yes) {
+                auto owner = self.lock();
+                if (!yes || !owner || owner->m_pending || owner->m_transitioning) return;
+                owner->m_pending = true; owner->requestRender();
+                Service::get().kickGuest(uid, [self](bool ok, std::string detail) {
+                    if (auto owner = self.lock()) {
+                        owner->m_pending = false; owner->requestRender();
+                        if (!ok) error(detail);
+                    }
+                });
+            });
     }
     void onDownload(CCObject*) {
         if (!m_downloading) {

@@ -35,6 +35,7 @@ SimplePlayer* icon(PlayerProfile const& profile, float scale = .85f) {
     auto* result = SimplePlayer::create(std::clamp(profile.icon, 1, count));
     result->setColors(color(profile.color1), color(profile.color2));
     result->setGlowOutline(ccWHITE);
+    addMembershipAura(result, profile.membership);
     result->setScale(scale);
     return result;
 }
@@ -342,6 +343,9 @@ public:
     }
     void report(bool force = false) {
         if (!active || finished || !sameBattle() || reporting || (!dirty && !force)) return;
+        // Do not lose an entire report interval when a room poll is in flight.
+        if (!Service::get().battleReportAvailable()) return;
+        reportTimer = .2f;
         bool position = false; // Local spectator runner needs only progress.
         reporting = true; dirty = false;
         auto epoch = generation;
@@ -878,8 +882,7 @@ public:
         }
         updateSpectator(owner.data(), dt);
         reportTimer -= dt;
-        if (reportTimer <= 0.f) {
-            reportTimer = .5f;
+        if (progressReportDue(reportTimer, reporting, dirty, local.paused, Service::get().battleReportAvailable())) {
             report(local.paused);
         }
         uiTimer -= dt;

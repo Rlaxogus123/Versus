@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 
-project(Versus VERSION 0.5.3 LANGUAGES C CXX)
+project(Versus VERSION 0.5.4 LANGUAGES C CXX)
 option(VERSUS_MEMBERSHIP "Build membership cosmetics instead of the standard edition" OFF)
 
 # A successful local Windows build is installed into the active Geode profile.
