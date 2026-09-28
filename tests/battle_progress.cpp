@@ -5,6 +5,11 @@ using namespace versus;
 using namespace versus::battle;
 void require(bool value, char const* message) { if (!value) throw std::runtime_error(message); }
 int main() {
+    require(!progressReportDue(-2.f, false, true, false, false), "slow poll defers report without consuming timer");
+    require(progressReportDue(-2.f, false, true, false, true), "deferred progress sends immediately when poll completes");
+    require(!progressReportDue(0.f, true, true, false, true), "reports cannot overlap");
+    require(!progressReportDue(0.f, false, false, false, true), "idle spectator does not write unchanged state");
+    require(progressReportDue(0.f, false, false, true, true), "paused client may resolve timeout");
     GameRules rules; rules.attempts = 2;
     BattlePlayerState a, b; a.inAttempt = b.inAttempt = true; a.runNumber = b.runNumber = 1;
     require(finishAttempt(b, rules, 20), "first B death counted");
